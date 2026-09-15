@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a new capability, integration, or improvement
+title: "feat: "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or workflow gap does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired behavior without assuming a specific implementation unless necessary.
+    validations:
+      required: true
+  - type: textarea
+    id: agent
+    attributes:
+      label: Agent or provider relevance
+      description: If this affects a provider or CLI, name it and link official documentation when possible.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and policy considerations
+      description: Does this change permissions, credentials, provider automation, networking, filesystem access, or account usage?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. What other approaches did you consider?

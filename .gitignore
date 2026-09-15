@@ -1,0 +1,33 @@
+# Binaries
+cliostra
+cliostra.exe
+bin/
+dist/
+
+# Go
+*.test
+*.out
+coverage.out
+vendor/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+.cache/

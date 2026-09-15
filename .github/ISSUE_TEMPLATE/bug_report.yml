@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible problem in Cliostra
+title: "bug: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include API keys, tokens, cookies, credentials, or private source code.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect Cliostra to do?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence you can.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Linux / macOS / Windows
+    validations:
+      required: true
+  - type: textarea
+    id: agents
+    attributes:
+      label: Agents involved
+      description: Which host and worker agents were involved? Include versions when available.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Sanitized logs, screenshots, or other relevant details.
