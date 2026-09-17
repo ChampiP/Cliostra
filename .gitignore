@@ -1,6 +1,8 @@
 # Binaries
-cliostra
-cliostra.exe
+/cliostra
+/cliostra.exe
+/cliostrad
+/cliostrad.exe
 bin/
 dist/
 
@@ -31,3 +33,6 @@ Thumbs.db
 *.log
 tmp/
 .cache/
+
+# Local agent registry
+.atl/

@@ -1,0 +1,43 @@
+schema: spec-driven
+
+context: |
+  Status: documentation-first pre-alpha; no implementation project marker exists yet.
+  Planned core: Go, MCP-first local orchestration, with a cross-platform terminal UI under evaluation.
+  Conceptual components: MCP interface, job/session manager, discovery, capability registry, policy, and adapters.
+  Architecture: provider-agnostic and capability-driven; worker results are untrusted data.
+  Security: preserve provider controls, avoid credential access, and use least privilege.
+  Delivery: single PR, maximum 400 changed lines unless a maintainer approves size:exception.
+
+strict_tdd: false
+testing:
+  workspace_test_command: ""
+  projects: []
+  rationale: >-
+    No supported implementation project markers or workspace-wide test command were found.
+    Strict TDD remains disabled until a workspace-level command covers every in-scope project.
+
+rules:
+  proposal:
+    - Open an issue before changes affecting architecture, provider support, security boundaries, MCP contracts, jobs, sessions, or configuration UX.
+    - Include rollback and provider-policy impact for risky changes.
+  specs:
+    - Use Given/When/Then scenarios and RFC 2119 keywords.
+    - State security, permission, and provider-policy constraints when applicable.
+  design:
+    - Preserve local-first, provider-agnostic, MCP-first, capability-driven, and least-privilege principles.
+    - Treat worker output as data, never as authorization policy.
+  tasks:
+    - Keep the change within one PR and 400 changed lines unless size:exception is maintainer-approved.
+    - Group work into independently verifiable phases.
+  apply:
+    guidelines:
+      - Use structured process invocation; never interpolate model-generated text into shell commands.
+      - Do not access, copy, or expose credentials, tokens, cookies, or sensitive environment values.
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas.
