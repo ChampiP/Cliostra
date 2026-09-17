@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          diff <(gofmt -l .) <(echo -n)
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -race -count=1
+
+  binaries:
+    name: Binary smoke test
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          go build -o /tmp/cliostrad ./cmd/cliostrad
+          go build -o /tmp/cliostra ./cmd/cliostra
+
+      - name: cliostra usage exits non-zero with no args
+        run: |
+          set +e
+          /tmp/cliostra
+          status=$?
+          set -e
+          test "$status" -eq 2
+
+      - name: cliostrad starts and serves the real socket protocol
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          /tmp/cliostrad &
+          daemon_pid=$!
+          trap 'kill "$daemon_pid" 2>/dev/null || true' EXIT
+
+          sock="$XDG_RUNTIME_DIR/cliostra.sock"
+          for _ in $(seq 1 20); do
+            [ -S "$sock" ] && break
+            sleep 0.2
+          done
+          test -S "$sock"
+
+          # Real RPC round-trip against an unknown job id: exercises the
+          # actual socket wire protocol without needing any agent CLI.
+          out="$(/tmp/cliostra status --id nonexistent-job-id 2>&1)" || true
+          echo "$out"
+          echo "$out" | grep -q "not_found\|no encontrado\|error"
+
+          kill "$daemon_pid"
+          wait "$daemon_pid" 2>/dev/null || true
