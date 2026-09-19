@@ -25,6 +25,9 @@ func (CodexAdapter) Capabilities() Capabilities {
 // --sandbox read-only; read_only=false usa --sandbox workspace-write, que ya
 // es nativo y no requiere flags de "skip permisos". El esfuerzo no tiene flag
 // propio: se pasa como override de config TOML (model_reasoning_effort).
+// codex corre directo sobre el repo real (runtime.execute no le arma
+// worktree aislado): un worktree armado desde HEAD le escondía archivos
+// staged/untracked que la tarea delegada necesitaba leer.
 func (CodexAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, error) {
 	path, err := lookPath("codex")
 	if err != nil {

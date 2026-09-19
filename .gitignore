@@ -36,3 +36,4 @@ tmp/
 
 # Local agent registry
 .atl/
+.codegraph/
