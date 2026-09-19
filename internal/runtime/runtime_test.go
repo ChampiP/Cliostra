@@ -165,6 +165,38 @@ func TestDiffExcludesAgentScaffolding(t *testing.T) {
 	}
 }
 
+// codex y agy trabajan directo sobre el repo real, no en un worktree
+// descartable (ver directRepoAdapters): sus propios CLIs no respetan el
+// aislamiento (agy) o el worktree armado desde HEAD les esconde archivos sin
+// commitear (codex). Este test fija ese contrato: el proceso debe correr con
+// Dir = raíz del repo, y el cambio debe quedar en el repo real.
+func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
+	repo := initTestRepo(t)
+	editScript := `echo directo > f.txt; echo listo`
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"codex": fakeAdapter{script: editScript}}, 1)
+
+	id, err := rt.Start(StartRequest{Adapter: "codex", Repo: repo, Prompt: "hola", ReadOnly: false})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	j := waitTerminal(t, rt, id)
+	if j.State != StateSucceeded {
+		t.Fatalf("estado inesperado: %+v", j)
+	}
+	// Sin worktree aislado, no hay diff que capturar: el cambio ya está en
+	// el repo real.
+	if j.Diff != "" {
+		t.Fatalf("modo directo no debe capturar diff: %q", j.Diff)
+	}
+	changed, err := os.ReadFile(filepath.Join(repo, "f.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(changed)) != "directo" {
+		t.Fatalf("el cambio debe aplicarse al repo real, got %q", changed)
+	}
+}
+
 func TestReadOnlyModeOmitsDiff(t *testing.T) {
 	repo := initTestRepo(t)
 	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{}}, 1)
