@@ -70,10 +70,10 @@ func mustDial() net.Conn {
 
 func cmdStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	adapter := fs.String("adapter", "", "adaptador (claude-code o agy)")
+	adapter := fs.String("adapter", "", "adaptador (claude-code, agy, codex u opencode)")
 	repo := fs.String("repo", "", "ruta absoluta al repositorio git")
 	prompt := fs.String("prompt", "", "instrucción para el trabajo")
-	write := fs.Bool("write", false, "permite edición real en el worktree administrado (default: solo lectura)")
+	write := fs.Bool("write", false, "permite edición real: worktree administrado para claude-code/opencode, repo real directo para codex/agy (default: solo lectura)")
 	model := fs.String("model", "", "modelo a usar (opcional; vacío = default del adaptador)")
 	effort := fs.String("effort", "", "nivel de esfuerzo (opcional; vacío = default del adaptador)")
 	fs.Parse(args)

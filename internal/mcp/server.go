@@ -44,10 +44,10 @@ type waitArgs struct {
 }
 
 type runArgs struct {
-	Adapter        string `json:"adapter" jsonschema:"nombre del adaptador (claude-code o agy)"`
+	Adapter        string `json:"adapter" jsonschema:"nombre del adaptador (claude-code, agy, codex u opencode)"`
 	Repo           string `json:"repo" jsonschema:"ruta absoluta al repositorio git"`
 	Prompt         string `json:"prompt" jsonschema:"instrucción para el trabajo"`
-	ReadOnly       bool   `json:"read_only" jsonschema:"true: solo inspecciona, nunca edita. false: edita y ejecuta comandos de verdad, pero SOLO dentro de un worktree git desechable (detached HEAD); el repo real nunca se toca. El resultado incluye el diff para revisar antes de aplicarlo a tu rama real."`
+	ReadOnly       bool   `json:"read_only" jsonschema:"true: solo inspecciona, nunca edita. false: edita y ejecuta comandos de verdad. claude-code y opencode escriben SOLO dentro de un worktree git desechable (detached HEAD), el repo real nunca se toca, y el resultado incluye el diff para revisar antes de aplicarlo a tu rama real. codex y agy escriben directo sobre el repo real (sin worktree ni diff de revisión): sus propios CLIs no respetan de forma confiable un directorio de trabajo aislado."`
 	Model          string `json:"model,omitempty" jsonschema:"modelo a usar, opcional: si se omite se usa el default del CLI del adaptador. Los nombres válidos dependen del adaptador, por ejemplo para claude-code: sonnet, opus; para agy: gemini-3.8-flash-low."`
 	Effort         string `json:"effort,omitempty" jsonschema:"nivel de esfuerzo a usar, opcional: si se omite se usa el default del CLI del adaptador (ej. low, medium, high)."`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"tiempo máximo de espera del resultado en segundos (default 60, máximo 600)"`
