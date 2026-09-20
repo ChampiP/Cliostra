@@ -6,7 +6,7 @@
 
 **Turn the AI agents you already have installed and authenticated into interoperable subagents — through MCP, isolated sessions, and clean final-result handoffs.**
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Project Status](https://img.shields.io/badge/status-design%20%2F%20pre--alpha-orange.svg)](#project-status)
 [![MCP](https://img.shields.io/badge/protocol-MCP-7c3aed.svg)](https://modelcontextprotocol.io/)
 [![Go](https://img.shields.io/badge/core-Go-00ADD8.svg?logo=go&logoColor=white)](https://go.dev/)
@@ -59,63 +59,79 @@ An agent may be:
 
 For example, Claude Code could delegate to Codex in one session, while OpenCode could delegate to Claude Code in another. Cliostra should not hard-code a permanent hierarchy between providers.
 
-## How it should work
+## How it works
+
+Cliostra operates as a lightweight local system with three primary layers:
+
+1. **`cliostrad` daemon**: A per-user background daemon listening exclusively on a private Unix domain socket (`0600`) under `$XDG_RUNTIME_DIR/cliostra/cliostrad.sock` (or `~/.local/state/cliostra/`). It persists durable job records (`queued`, `preparing`, `running`, `succeeded`, `failed`, `canceled`) in `$XDG_STATE_HOME/cliostra/jobs`, coordinates a worker pool, recovers unfinished jobs on restart, and runs background MCP synchronization (e.g. for `agy`).
+2. **`cliostra` CLI & MCP server**: A client binary that communicates with `cliostrad` via Unix socket RPC. It provides CLI commands (`start`, `status`, `result`, `cancel`) and runs an MCP server over stdio via `cliostra mcp` exposing tools: `run`, `status`, `result`, `wait`, `cancel`, and `delegate`.
+3. **Provider adapters (`internal/adapters`)**: Concrete process builders for installed AI CLI tools (`claude-code`, `agy`, `codex`, `opencode`) using fixed argument vectors and stdin (no shell execution, no credential extraction).
 
 ```mermaid
 flowchart LR
     USER[Developer]
 
-    subgraph HOST["MCP-compatible host"]
+    subgraph HOST["MCP Host"]
         H["Claude Code / OpenCode / Codex / other"]
     end
 
-    subgraph CLIOSTRA["Cliostra"]
-        MCP["MCP interface"]
-        JOBS["Jobs & sessions"]
-        CAPS["Capability registry"]
-        POLICY["Safety & policy"]
-        ADAPTERS["Agent adapters"]
+    subgraph CLIENT["Cliostra Client"]
+        CLI["cliostra CLI (start / status / result / cancel)"]
+        MCP["cliostra mcp (run / wait / status / result / cancel / delegate)"]
     end
 
-    subgraph WORKERS["Local AI agents"]
-        W1["Claude Code"]
-        W2["OpenCode"]
-        W3["Codex"]
-        W4["Antigravity"]
-        W5["Other supported agents"]
+    subgraph DAEMON["cliostrad Daemon"]
+        SOCK["Unix Domain Socket (0600)"]
+        RPC["RPC Handler"]
+        RUNTIME["Runtime Engine (Queue & Workers)"]
+        STORE["Durable Store (XDG_STATE_HOME)"]
     end
 
-    USER --> H
-    H -->|delegate task| MCP
-    MCP --> JOBS
-    JOBS --> POLICY
-    JOBS --> CAPS
-    JOBS --> ADAPTERS
-    ADAPTERS --> W1
-    ADAPTERS --> W2
-    ADAPTERS --> W3
-    ADAPTERS --> W4
-    ADAPTERS --> W5
-    W1 -->|final result| JOBS
-    W2 -->|final result| JOBS
-    W3 -->|final result| JOBS
-    W4 -->|final result| JOBS
-    W5 -->|final result| JOBS
-    JOBS -->|clean result| MCP
-    MCP --> H
+    subgraph ADAPTERS["Worker Adapters (internal/adapters)"]
+        W1["claude-code (claude CLI)"]
+        W2["opencode (opencode run)"]
+        W3["codex (codex exec)"]
+        W4["agy (Antigravity NDJSON)"]
+    end
+
+    subgraph NOTIFY["Push Notification"]
+        UDS["Claude Code Messaging Socket"]
+    end
+
+    USER --> CLI
+    H -->|stdio MCP| MCP
+    CLI -->|Unix socket RPC| SOCK
+    MCP -->|Unix socket RPC| SOCK
+    SOCK --> RPC
+    RPC --> RUNTIME
+    RUNTIME <--> STORE
+    RUNTIME --> ADAPTERS
+    ADAPTERS -->|execute in shared repo root| USER
+    MCP -.->|background completion notice| UDS
+    UDS -.->|injected user message| H
 ```
 
-The intended execution model is:
+### Execution model
 
-1. A host asks Cliostra to delegate a task.
-2. Cliostra validates which local agents are available and which capabilities are allowed.
-3. The host chooses or requests a worker, model, effort level, workspace, session behavior, prompt, and optional capabilities when the target supports them.
-4. Cliostra starts the worker through its supported local interface.
-5. The worker runs in its own context and workspace scope.
-6. Long-running work can continue independently instead of blocking the host unnecessarily.
-7. The host receives the final result required to continue its own task.
+1. **Task initiation**:
+   - **Via MCP**: A host calls `run` (synchronous, blocking until completion or timeout) or `delegate` (asynchronous, non-blocking).
+   - **Via CLI**: The developer calls `cliostra start --adapter <name> --repo <path> --prompt <text> [--write] [--model <m>] [--effort <e>]`.
+2. **Durable queue & supervision**:
+   - `cliostrad` accepts the job, registers it in the durable store, and dispatches it to an available worker goroutine.
+   - If the daemon crashes or restarts, jobs in non-terminal states are recovered.
+3. **Adapters & repository execution**:
+   - The assigned adapter generates a structured execution specification (`ProcessSpec`) without shell interpolation.
+   - **Shared repository execution vs. worktree isolation**: While `internal/runtime/worktree.go` includes helpers for disposable git worktrees, all four current adapters (`claude-code`, `agy`, `codex`, `opencode`) are configured as `directRepoAdapters` and run in the shared repository root (`gitToplevel`). This ensures:
+     - `agy` commands are not derailed by unreliable directory isolation in headless mode;
+     - `codex` can access unstaged or untracked working files;
+     - Developers and host agents can inspect changes in real time using `git diff`.
+   - `read_only` mode is enforced logically through provider flags and sandboxes (e.g., `plan` mode for Claude, tool restriction prompts for Antigravity, `--sandbox read-only` for Codex, and permission denial via `OPENCODE_CONFIG_CONTENT` for OpenCode), rather than filesystem permission stripping.
+4. **Result handoff & notifications**:
+   - Once the process terminates, the adapter parses structured output (JSON, JSONL, or NDJSON events) to extract the clean final result.
+   - For synchronous callers (`run`, `wait`, or `cliostra result`), the result is returned directly.
+   - For asynchronous callers in Claude Code (`delegate`), Cliostra uses `internal/notify` to deliver the outcome directly into the active session via Claude Code's messaging socket.
 
-The main agent should **not** receive the worker's full execution trace by default.
+The main agent does **not** receive the worker's full execution trace by default.
 
 ## Context-efficient delegation
 
@@ -138,13 +154,13 @@ Host <- every log, tool event, intermediate step and worker transcript
 
 This does not eliminate the worker's own token or quota usage. The purpose is to **distribute work across available agents and reduce unnecessary context consumption in the host**.
 
-## Long-running subagents
+## Long-running subagents & async notifications
 
-Some delegated tasks may take seconds; others may take many minutes.
+Delegated tasks can range from quick queries to multi-minute code changes. Cliostra supports both synchronous and asynchronous coordination patterns:
 
-Cliostra is intended to support a job/session model where the host can start a worker, continue doing other work, and later retrieve or receive the result. MCP includes task-oriented primitives for long-running operations, but Cliostra should remain usable even when a host does not yet implement every optional MCP capability.
-
-The exact protocol contract is intentionally not frozen yet. The project is currently defining the cleanest compatibility model before implementation.
+- **Synchronous (`run` / `wait`)**: The host invokes `run`, which blocks on the server side until the worker finishes or a timeout expires (default 60s, up to 10 minutes). If a timeout is reached, the job continues running in `cliostrad`, and the host can resume waiting with `wait --id <id>`.
+- **Asynchronous push notifications (`delegate`)**: When running inside Claude Code (`CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`), the host can invoke `delegate`. This tool enqueues the job and immediately returns the job ID. A background goroutine in `cliostra mcp` waits for completion (up to 2 hours) and automatically posts a notification into Claude Code's session via the Unix messaging socket with the job ID, adapter, terminal state, final result, and diff (capped at 4,000 characters). The host never needs to poll `status` or manage sleep loops.
+- **Durable polling (`status` / `result`)**: Any client or host can query durable job state or retrieve the final result at any time using the job ID.
 
 ## Agent discovery
 
@@ -201,7 +217,7 @@ Cliostra is intended to support:
 - macOS
 - Windows
 
-The core is planned in **Go** because the project benefits from a lightweight native binary, process supervision, concurrency primitives, and straightforward cross-platform distribution.
+The core is written in **Go** because the project benefits from a lightweight native binary, process supervision, concurrency primitives, and straightforward cross-platform distribution.
 
 The TUI framework is not locked yet. Bubble Tea is being evaluated because it is a mature Go TUI ecosystem and fits the single-binary direction.
 
@@ -218,11 +234,15 @@ Cliostra therefore separates:
 - **capability discovery** so unsupported features are not assumed;
 - **policy validation** so a technically possible integration is not automatically considered acceptable.
 
-## Adapter execution
+## Adapter execution: shared repo vs. worktrees
 
-All four adapters—**Claude Code**, **Antigravity (`agy`)**, **Codex**, and **OpenCode**—run in the shared repository root. Cliostra does not create a disposable worktree or manage a review diff for any adapter. Changes are visible while a job runs and can be inspected with `git diff`.
+While the Cliostra runtime includes git worktree isolation utilities (`prepareWorktree` / `cleanupWorktree`), all four current adapters—**Claude Code**, **Antigravity (`agy`)**, **Codex**, and **OpenCode**—run directly in the shared repository root (`directRepoAdapters`):
 
-`read_only` is an instruction to the provider, not structural filesystem isolation.
+- **Tool confinement**: CLI agents like `agy` do not reliably constrain their tool/command execution to secondary worktree paths in headless mode.
+- **Context visibility**: Tools like `codex` need access to untracked or staged files that a clean `HEAD` worktree would hide.
+- **Live inspection**: Executing on the shared working copy allows developers to monitor changes in real time via `git diff` without waiting for a detached diff review handoff.
+
+`read_only` is an instruction and permission restriction passed directly to the provider/sandbox, not structural filesystem isolation.
 
 ## Security and provider policies
 
@@ -242,19 +262,17 @@ Each provider integration must be reviewed independently because technical autom
 
 See [`docs/SECURITY_AND_POLICY.md`](docs/SECURITY_AND_POLICY.md) for the project's security and provider-policy posture.
 
-## Planned integrations
+## Supported & planned integrations
 
-The following agents are part of the research and design scope. This table does **not** mean they are implemented or approved for stable use yet.
+The following agents are part of the orchestration scope:
 
-| Agent | Host role | Worker role | Current project status |
+| Agent | Host role | Worker role | Current status |
 | --- | --- | --- | --- |
-| Claude Code | MCP-capable | Programmatic surfaces exist | Research / adapter design |
-| OpenCode | MCP-capable | Local/open-source integration candidate | Research / adapter design |
-| OpenAI Codex | MCP-capable depending on setup | Programmatic CLI/SDK surfaces exist | Research / policy validation |
-| Google Antigravity | Under evaluation | Headless automation exists | Policy validation required |
-| Other MCP hosts | Candidate | Depends on adapter | Extensible by design |
-
-Provider support will only be marked stable after technical, security, and policy validation.
+| Claude Code | MCP host & async socket notification | CLI adapter (`claude --print --permission-mode`) | Implemented (`internal/adapters/claude.go`) |
+| OpenCode | MCP host & plugin (`plugins/opencode`) | CLI adapter (`opencode run --pure`) | Implemented (`internal/adapters/opencode.go`) |
+| OpenAI Codex | MCP host | CLI adapter (`codex exec --json`) | Implemented (`internal/adapters/codex.go`) |
+| Google Antigravity | MCP host | CLI adapter (`agy` NDJSON stream) | Implemented (`internal/adapters/agy.go`) |
+| Other MCP hosts | Candidate via stdio MCP | Custom adapter | Extensible via `internal/adapters` |
 
 ## Project status
 
@@ -294,7 +312,7 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening implementation w
 
 ## License
 
-Cliostra is licensed under the [Apache License 2.0](LICENSE).
+Cliostra is licensed under the [MIT License](LICENSE).
 
 ## Disclaimer
 
