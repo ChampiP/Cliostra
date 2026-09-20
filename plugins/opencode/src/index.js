@@ -21,7 +21,7 @@ export const CliostraPlugin = async ({ client }) => {
           "Usala para trabajo largo; avisá al usuario que seguís disponible mientras corre.",
         args: {
           adapter: tool.schema
-            .enum(["claude-code", "agy"])
+            .enum(["claude-code", "agy", "codex", "opencode"])
             .describe("agente que ejecuta el trabajo"),
           repo: tool.schema.string().describe("ruta absoluta al repositorio git"),
           prompt: tool.schema.string().describe("instrucción para el agente delegado"),
