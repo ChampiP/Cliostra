@@ -539,3 +539,9 @@ func TestRepeatedJobsDoNotLeakFileDescriptors(t *testing.T) {
 		t.Fatalf("fuga de descriptores: %d abiertos antes, %d después de 10 trabajos", before, after)
 	}
 }
+
+func TestMaxResultSizeFitsInMaxFrameSize(t *testing.T) {
+	if MaxResultSize >= api.MaxFrameSize {
+		t.Fatalf("MaxResultSize (%d) debe ser menor que api.MaxFrameSize (%d) para permitir su serialización RPC", MaxResultSize, api.MaxFrameSize)
+	}
+}
