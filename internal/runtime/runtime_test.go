@@ -627,4 +627,3 @@ func TestCancelQueuedJobRemovesFromQueueAndCancels(t *testing.T) {
 		t.Fatalf("el trabajo cancelado fue ejecutado indebidamente: %+v", j2Final)
 	}
 }
-
