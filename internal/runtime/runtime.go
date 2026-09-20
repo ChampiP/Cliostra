@@ -13,10 +13,13 @@ import (
 
 // Límites de tamaño del MVP: exceder cualquiera termina el trabajo en
 // failed con Truncated=true, nunca en canceled.
+// MaxResultSize se mantiene en 192 KiB para estar estrictamente por debajo de
+// api.MaxFrameSize (256 KiB), dejando margen para el resto del payload JSON del
+// frame (campos de ResultResponse y envelope RPC) para que WriteFrame no lo rechace.
 const (
 	MaxPromptSize = 64 * 1024
 	MaxStreamSize = 8 * 1024 * 1024
-	MaxResultSize = 1 * 1024 * 1024
+	MaxResultSize = 192 * 1024
 )
 
 // Errores devueltos por Start antes de crear proceso o worktree alguno.

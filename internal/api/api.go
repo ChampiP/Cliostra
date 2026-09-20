@@ -14,6 +14,8 @@ import (
 
 // MaxFrameSize es el límite duro por frame (256 KiB) para evitar que un
 // mensaje malformado o adversarial agote memoria del demonio.
+// IMPORTANTE: runtime.MaxResultSize debe mantenerse acotado por debajo de este
+// valor para permitir transmitir las respuestas RPC con su sobrecarga JSON.
 const MaxFrameSize = 256 * 1024
 
 // Código de error estable para que CLI y MCP mapeen mensajes sin parsear texto.
