@@ -56,6 +56,9 @@ var directRepoAdapters = map[string]bool{
 
 func (r *Runtime) execute(t *task) {
 	j := t.job
+	if j.State.IsTerminal() {
+		return
+	}
 	if err := Transition(j.State, StatePreparing); err != nil {
 		r.fail(j, "invalid_transition", false)
 		return

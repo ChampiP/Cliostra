@@ -32,7 +32,7 @@ func (s State) IsTerminal() bool {
 //
 //	running → canceling → canceled
 var edges = map[State]map[State]bool{
-	StateQueued:    {StatePreparing: true, StateFailed: true},
+	StateQueued:    {StatePreparing: true, StateFailed: true, StateCanceled: true},
 	StatePreparing: {StateRunning: true, StateFailed: true},
 	StateRunning:   {StateSucceeded: true, StateFailed: true, StateCanceling: true},
 	StateCanceling: {StateCanceled: true, StateFailed: true},

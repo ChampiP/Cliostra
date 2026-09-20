@@ -545,3 +545,57 @@ func TestMaxResultSizeFitsInMaxFrameSize(t *testing.T) {
 		t.Fatalf("MaxResultSize (%d) debe ser menor que api.MaxFrameSize (%d) para permitir su serialización RPC", MaxResultSize, api.MaxFrameSize)
 	}
 }
+
+func TestCancelQueuedJobRemovesFromQueueAndCancels(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{script: "sleep 0.5; echo ok"}}, 1)
+
+	id1, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "primero", ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id2, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "segundo", ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	j2, err := rt.Status(id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j2.State != StateQueued {
+		t.Fatalf("se esperaba estado queued para el segundo trabajo, got %s", j2.State)
+	}
+
+	canceledJob, supported, err := rt.Cancel(id2)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if !supported {
+		t.Fatal("cancelar un trabajo en cola debe reportar supported=true")
+	}
+	if canceledJob.State != StateCanceled {
+		t.Fatalf("se esperaba estado canceled, got %s", canceledJob.State)
+	}
+
+	rt.queueMu.Lock()
+	for _, tsk := range rt.queue {
+		if tsk.job.ID == id2 {
+			rt.queueMu.Unlock()
+			t.Fatal("el trabajo cancelado sigue en r.queue")
+		}
+	}
+	rt.queueMu.Unlock()
+
+	waitTerminal(t, rt, id1)
+
+	j2Final, err := rt.Status(id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j2Final.State != StateCanceled {
+		t.Fatalf("el trabajo cancelado fue ejecutado indebidamente: %+v", j2Final)
+	}
+}
+
