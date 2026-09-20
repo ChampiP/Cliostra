@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ChampiP/Cliostra/internal/adapters"
@@ -83,7 +82,7 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 	// pipe él mismo. Con un *os.File el extremo de lectura queda a cargo del
 	// llamador, y nadie lo cerraba (un fd filtrado por trabajo).
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 
 	lb := &limitedBuffer{limit: MaxStreamSize}
 	lb.onOverflow = func() {
@@ -119,37 +118,6 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 		}
 		return lb.Bytes(), false, false, werr
 	}
-}
-
-// terminateProcessGroup envía la señal de terminación al grupo de procesos.
-func terminateProcessGroup(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
-		return
-	}
-	sig, ok := processTerminateSignal().(syscall.Signal)
-	if !ok {
-		sig = syscall.SIGTERM
-	}
-	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {
-		_ = cmd.Process.Signal(processTerminateSignal())
-	}
-}
-
-// killProcessGroup fuerza la muerte de todo el grupo de procesos para no
-// dejar hijos huérfanos con pipes abiertos.
-func killProcessGroup(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
-		return
-	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		_ = cmd.Process.Kill()
-	}
-}
-
-// processTerminateSignal es SIGTERM: primer paso de la cancelación real
-// (TERM→KILL), aplicado solo tras la salida efectiva del proceso.
-func processTerminateSignal() os.Signal {
-	return syscall.SIGTERM
 }
 
 // filteredEnv hereda solo variables de entorno seguras (PATH, HOME, usuario,
