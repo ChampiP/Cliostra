@@ -194,9 +194,47 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 	r.procsMu.Unlock()
 
 	if !running {
-		// No hay proceso activo: si ya es terminal, se informa tal cual;
-		// si sigue queued, no hay capacidad que consultar todavía.
-		return j, j.State.IsTerminal(), nil
+		if j.State.IsTerminal() {
+			return j, true, nil
+		}
+		if j.State == StateQueued {
+			r.queueMu.Lock()
+			idx := -1
+			for i, t := range r.queue {
+				if t.job.ID == id {
+					idx = i
+					break
+				}
+			}
+			if idx != -1 {
+				r.queue = append(r.queue[:idx], r.queue[idx+1:]...)
+			}
+			r.queueMu.Unlock()
+
+			if idx != -1 {
+				if err := Transition(j.State, StateCanceled); err != nil {
+					return nil, false, err
+				}
+				j.State = StateCanceled
+				j.Reason = "canceled_by_client"
+				j.UpdatedAt = time.Now()
+				if err := r.store.Save(j); err != nil {
+					return nil, false, err
+				}
+				return j, true, nil
+			}
+
+			// Si un worker lo sacó justo antes, releemos el estado persistido.
+			latest, err := r.store.Load(id)
+			if err != nil {
+				return nil, false, err
+			}
+			j = latest
+			if j.State.IsTerminal() {
+				return j, true, nil
+			}
+		}
+		return j, false, nil
 	}
 	if !ph.adapter.Capabilities().Cancel {
 		return j, false, nil
