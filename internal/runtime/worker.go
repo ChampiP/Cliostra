@@ -41,6 +41,19 @@ func (r *Runtime) fail(j *Job, reason string, truncated bool) {
 	_ = r.store.Save(j)
 }
 
+// directRepoAdapters trabajan sobre el repo real del usuario en vez de un
+// worktree administrado descartable. El usuario elige esta modalidad para
+// ver los cambios en tiempo real; no hay diff aislado que revisar antes de
+// aplicar porque el cambio ya quedó en el repo. Corren con los permisos del
+// usuario: Git/GitHub ayudan a recuperar cambios, pero no impiden borrar
+// archivos locales durante la ejecución.
+var directRepoAdapters = map[string]bool{
+	"claude-code": true,
+	"codex":       true,
+	"agy":         true,
+	"opencode":    true,
+}
+
 func (r *Runtime) execute(t *task) {
 	j := t.job
 	if err := Transition(j.State, StatePreparing); err != nil {
@@ -53,17 +66,29 @@ func (r *Runtime) execute(t *task) {
 		return
 	}
 
-	worktreeDir := filepath.Join(r.worktreeRoot, j.ID)
-	repo, oid, err := prepareWorktree(j.Repo, worktreeDir, j.ReadOnly)
-	if err != nil {
-		r.fail(j, "worktree_error: "+err.Error(), false)
-		return
+	direct := directRepoAdapters[j.Adapter]
+
+	var dir string
+	if direct {
+		root, err := gitToplevel(j.Repo)
+		if err != nil {
+			r.fail(j, "worktree_error: "+err.Error(), false)
+			return
+		}
+		dir = root
+	} else {
+		worktreeDir := filepath.Join(r.worktreeRoot, j.ID)
+		root, _, err := prepareWorktree(j.Repo, worktreeDir, j.ReadOnly)
+		if err != nil {
+			r.fail(j, "worktree_error: "+err.Error(), false)
+			return
+		}
+		defer cleanupWorktree(root, worktreeDir)
+		dir = worktreeDir
 	}
-	defer cleanupWorktree(repo, worktreeDir)
-	_ = oid
 
 	adapter := r.adapters[j.Adapter]
-	spec, err := adapter.Build(adapters.StartRequest{Repo: j.Repo, Prompt: t.prompt, ReadOnly: j.ReadOnly, Model: j.Model, Effort: j.Effort}, worktreeDir)
+	spec, err := adapter.Build(adapters.StartRequest{Repo: j.Repo, Prompt: t.prompt, ReadOnly: j.ReadOnly, Model: j.Model, Effort: j.Effort}, dir)
 	if err != nil {
 		r.fail(j, "adapter_error: "+err.Error(), false)
 		return
@@ -119,11 +144,11 @@ func (r *Runtime) execute(t *task) {
 
 	j.State = StateSucceeded
 	j.Result = string(result)
-	if !j.ReadOnly {
+	if !j.ReadOnly && !direct {
 		// El worktree sigue vivo hasta que retorne execute() (cleanup
 		// diferido), así que el diff todavía refleja lo que el adaptador
 		// escribió antes de que se elimine.
-		if diff, err := gitDiff(worktreeDir); err == nil {
+		if diff, err := gitDiff(dir); err == nil {
 			j.Diff = diff
 		}
 	}

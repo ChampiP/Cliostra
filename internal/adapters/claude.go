@@ -1,8 +1,8 @@
 package adapters
 
 // ClaudeCodeAdapter ejecuta Claude Code, en modo de planificación (solo
-// lectura) o de edición autónoma según req.ReadOnly. El worktree administrado
-// es el límite de blast radius: nunca se toca el repo real del usuario.
+// lectura) o de edición autónoma según req.ReadOnly. El runtime le pasa la
+// raíz real del repositorio para que los cambios sean visibles en vivo.
 type ClaudeCodeAdapter struct{}
 
 func (ClaudeCodeAdapter) Name() string { return "claude-code" }

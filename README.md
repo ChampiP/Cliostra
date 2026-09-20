@@ -218,6 +218,12 @@ Cliostra therefore separates:
 - **capability discovery** so unsupported features are not assumed;
 - **policy validation** so a technically possible integration is not automatically considered acceptable.
 
+## Adapter execution
+
+All four adapters—**Claude Code**, **Antigravity (`agy`)**, **Codex**, and **OpenCode**—run in the shared repository root. Cliostra does not create a disposable worktree or manage a review diff for any adapter. Changes are visible while a job runs and can be inspected with `git diff`.
+
+`read_only` is an instruction to the provider, not structural filesystem isolation.
+
 ## Security and provider policies
 
 Cliostra is built around official local interfaces, not credential extraction.

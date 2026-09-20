@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ChampiP/Cliostra/internal/adapters"
+	"github.com/ChampiP/Cliostra/internal/api"
 )
 
 // fakeAdapter es un adaptador de prueba: no depende de Claude Code ni agy.
@@ -162,6 +164,62 @@ func TestDiffExcludesAgentScaffolding(t *testing.T) {
 	}
 	if strings.Contains(j.Diff, ".atl") {
 		t.Fatalf("el diff no debe incluir andamiaje de agentes: %q", j.Diff)
+	}
+}
+
+// claude-code, codex, agy y opencode trabajan directo sobre el repo real, no en un
+// worktree descartable (ver directRepoAdapters). Este test fija ese contrato:
+// el proceso debe correr con Dir = raíz del repo, y el cambio debe quedar en
+// el repo real.
+func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
+	for _, adapter := range []string{"claude-code", "codex", "agy", "opencode"} {
+		t.Run(adapter, func(t *testing.T) {
+			repo := initTestRepo(t)
+			editScript := `echo directo > f.txt; echo listo`
+			rt := newTestRuntime(t, map[string]adapters.Adapter{adapter: fakeAdapter{script: editScript}}, 1)
+
+			id, err := rt.Start(StartRequest{Adapter: adapter, Repo: repo, Prompt: "hola", ReadOnly: false})
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			j := waitTerminal(t, rt, id)
+			if j.State != StateSucceeded {
+				t.Fatalf("estado inesperado: %+v", j)
+			}
+			// Sin worktree aislado, no hay diff que capturar: el cambio ya está en
+			// el repo real.
+			if j.Diff != "" {
+				t.Fatalf("modo directo no debe capturar diff: %q", j.Diff)
+			}
+			changed, err := os.ReadFile(filepath.Join(repo, "f.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(changed)) != "directo" {
+				t.Fatalf("el cambio debe aplicarse al repo real, got %q", changed)
+			}
+		})
+	}
+}
+
+func TestResultHandlerIncludesTerminalReason(t *testing.T) {
+	rt := newTestRuntime(t, map[string]adapters.Adapter{}, 1)
+	job := &Job{ID: "failed", State: StateFailed, Reason: "process_error: exit status 1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := rt.store.Save(job); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(api.ResultRequest{ID: job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, apiErr := resultHandler(rt)(payload)
+	if apiErr != nil {
+		t.Fatalf("resultHandler: %v", apiErr)
+	}
+	result := response.(api.ResultResponse)
+	if !result.Available || result.Reason != job.Reason {
+		t.Fatalf("result debe exponer el motivo terminal: %+v", result)
 	}
 }
 

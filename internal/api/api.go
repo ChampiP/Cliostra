@@ -83,6 +83,7 @@ type ResultResponse struct {
 	ID        string `json:"id"`
 	State     string `json:"state"`
 	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 	Result    string `json:"result,omitempty"`
 	Diff      string `json:"diff,omitempty"`
 	Truncated bool   `json:"truncated"`

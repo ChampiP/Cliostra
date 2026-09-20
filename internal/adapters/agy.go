@@ -45,8 +45,10 @@ type agyUserEvent struct {
 // {"event":"user",...}. read_only=true antepone una restricción de
 // herramientas al prompt; read_only=false agrega
 // --dangerously-skip-permissions, la única forma de que agy edite/ejecute de
-// verdad en headless. El worktree administrado sigue siendo el límite: agy
-// corre con Dir=worktreeDir, nunca en el repo real.
+// verdad en headless. agy corre directo sobre el repo real (runtime.execute
+// no le arma worktree aislado): su run_command no respeta de forma
+// confiable Dir=worktreeDir, así que fingir aislamiento solo escondía el
+// riesgo real.
 func (AgyAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, error) {
 	path, err := lookPath("agy")
 	if err != nil {
