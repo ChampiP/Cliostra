@@ -23,6 +23,6 @@ export function describeResult(job, result) {
   if (result.state !== "succeeded") {
     return `${header}\n\nMotivo: ${result.reason || "sin detalle"}\n\nInformale al usuario que falló y por qué. No lo reintentes sin que te lo pida.`
   }
-  const diff = result.diff ? `\n\nDiff producido (en el worktree administrado, el repo real no fue tocado):\n\`\`\`diff\n${result.diff}\n\`\`\`` : ""
+  const diff = result.diff ? `\n\nDiff producido por el worktree administrado:\n\`\`\`diff\n${result.diff}\n\`\`\`` : ""
   return `${header}\n\nResultado:\n${result.result || "(sin salida)"}${diff}\n\nResumile esto al usuario de forma concisa.`
 }

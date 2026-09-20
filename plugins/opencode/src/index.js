@@ -16,7 +16,7 @@ export const CliostraPlugin = async ({ client }) => {
     tool: {
       cliostra_delegate: tool({
         description:
-          "Delega una tarea a otro agente de programación (Claude Code o agy) en un worktree git aislado y devuelve el control DE INMEDIATO. " +
+          "Delega una tarea a otro agente de programación y devuelve el control DE INMEDIATO. Claude Code trabaja en un worktree git desechable; agy trabaja deliberadamente sobre el repositorio real para que sus cambios se vean en tiempo real. " +
           "No bloquea y no hace falta consultar el estado después: cuando el trabajo termina, su resultado llega solo a esta sesión. " +
           "Usala para trabajo largo; avisá al usuario que seguís disponible mientras corre.",
         args: {
@@ -28,7 +28,7 @@ export const CliostraPlugin = async ({ client }) => {
           read_only: tool.schema
             .boolean()
             .describe(
-              "true: solo inspecciona. false: edita y ejecuta comandos, pero SOLO dentro de un worktree git desechable; el repo real nunca se toca y el resultado incluye el diff.",
+              "true: solicita solo inspección mediante las restricciones del adaptador; agy sigue ejecutándose sobre el repositorio real, sin aislamiento estructural. false: Claude Code edita en su worktree y devuelve un diff; agy puede editar y ejecutar sobre el repo real. Los procesos tienen los permisos del usuario: Git/GitHub ayudan a recuperar cambios, pero no impiden borrar archivos locales durante la ejecución.",
             ),
         },
         async execute(args, context) {
