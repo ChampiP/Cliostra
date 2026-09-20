@@ -12,6 +12,9 @@ func TestTransitionValidPath(t *testing.T) {
 }
 
 func TestTransitionCancelPath(t *testing.T) {
+	if err := Transition(StateQueued, StateCanceled); err != nil {
+		t.Fatalf("queued->canceled debería ser válida: %v", err)
+	}
 	if err := Transition(StateRunning, StateCanceling); err != nil {
 		t.Fatalf("running->canceling debería ser válida: %v", err)
 	}

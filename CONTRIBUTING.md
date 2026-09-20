@@ -86,4 +86,4 @@ Participation in Cliostra requires respectful, technical, good-faith collaborati
 
 ## License
 
-By contributing to Cliostra, you agree that your contributions are licensed under the Apache License 2.0 used by this repository.
+By contributing to Cliostra, you agree that your contributions are licensed under the MIT License used by this repository.

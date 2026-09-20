@@ -7,10 +7,12 @@ package mcpsync
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 )
 
 // mcpConfig es el esquema compartido por ambos registros de agy.
@@ -19,9 +21,10 @@ type mcpConfig struct {
 }
 
 type mcpServerEntry struct {
-	Command   string   `json:"command,omitempty"`
-	Args      []string `json:"args,omitempty"`
-	ServerURL string   `json:"serverUrl,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	ServerURL string            `json:"serverUrl,omitempty"`
 }
 
 // lookPath es una variable para poder sustituirla en pruebas (mismo patrón
@@ -77,15 +80,27 @@ func missingEntries(desktopPath, headlessPath string) (map[string]mcpServerEntry
 	return missing, nil
 }
 
-// addArgs traduce una entrada de MCP en el argv posicional de
-// `agy mcp add <nombre> <comandoOUrl> [args...]`.
+// addArgs traduce una entrada de MCP en el argv de
+// `agy mcp add [--env K=V...] <nombre> <comandoOUrl> [args...]`.
 func addArgs(name string, entry mcpServerEntry) []string {
-	if entry.ServerURL != "" {
-		return []string{"mcp", "add", name, entry.ServerURL}
+	var flags []string
+	if len(entry.Env) > 0 {
+		keys := make([]string, 0, len(entry.Env))
+		for k := range entry.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			flags = append(flags, "--env", fmt.Sprintf("%s=%s", k, entry.Env[k]))
+		}
 	}
-	args := []string{"mcp", "add", name, entry.Command}
-	args = append(args, entry.Args...)
-	return args
+	base := append([]string{"mcp", "add"}, flags...)
+	if entry.ServerURL != "" {
+		return append(base, name, entry.ServerURL)
+	}
+	base = append(base, name, entry.Command)
+	base = append(base, entry.Args...)
+	return base
 }
 
 // SyncAgy sincroniza el registro headless de agy con el de escritorio: copia

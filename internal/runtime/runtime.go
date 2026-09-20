@@ -13,10 +13,13 @@ import (
 
 // Límites de tamaño del MVP: exceder cualquiera termina el trabajo en
 // failed con Truncated=true, nunca en canceled.
+// MaxResultSize se mantiene en 192 KiB para estar estrictamente por debajo de
+// api.MaxFrameSize (256 KiB), dejando margen para el resto del payload JSON del
+// frame (campos de ResultResponse y envelope RPC) para que WriteFrame no lo rechace.
 const (
 	MaxPromptSize = 64 * 1024
 	MaxStreamSize = 8 * 1024 * 1024
-	MaxResultSize = 1 * 1024 * 1024
+	MaxResultSize = 192 * 1024
 )
 
 // Errores devueltos por Start antes de crear proceso o worktree alguno.
@@ -191,9 +194,47 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 	r.procsMu.Unlock()
 
 	if !running {
-		// No hay proceso activo: si ya es terminal, se informa tal cual;
-		// si sigue queued, no hay capacidad que consultar todavía.
-		return j, j.State.IsTerminal(), nil
+		if j.State.IsTerminal() {
+			return j, true, nil
+		}
+		if j.State == StateQueued {
+			r.queueMu.Lock()
+			idx := -1
+			for i, t := range r.queue {
+				if t.job.ID == id {
+					idx = i
+					break
+				}
+			}
+			if idx != -1 {
+				r.queue = append(r.queue[:idx], r.queue[idx+1:]...)
+			}
+			r.queueMu.Unlock()
+
+			if idx != -1 {
+				if err := Transition(j.State, StateCanceled); err != nil {
+					return nil, false, err
+				}
+				j.State = StateCanceled
+				j.Reason = "canceled_by_client"
+				j.UpdatedAt = time.Now()
+				if err := r.store.Save(j); err != nil {
+					return nil, false, err
+				}
+				return j, true, nil
+			}
+
+			// Si un worker lo sacó justo antes, releemos el estado persistido.
+			latest, err := r.store.Load(id)
+			if err != nil {
+				return nil, false, err
+			}
+			j = latest
+			if j.State.IsTerminal() {
+				return j, true, nil
+			}
+		}
+		return j, false, nil
 	}
 	if !ph.adapter.Capabilities().Cancel {
 		return j, false, nil
@@ -211,7 +252,9 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 	ph.signalCancel()
 
 	// Bloquea hasta que el worker detecte la cancelación y el proceso salga;
-	// se refleja al releer el estado persistido.
+	// se refleja al releer el estado persistido con un timeout acotado para
+	// no colgar el llamador indefinidamente.
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		latest, err := r.store.Load(id)
 		if err != nil {
@@ -219,6 +262,9 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 		}
 		if latest.State.IsTerminal() {
 			return latest, true, nil
+		}
+		if time.Now().After(deadline) {
+			return j, true, errors.New("timeout esperando cancelación del proceso")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

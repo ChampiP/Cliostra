@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ChampiP/Cliostra/internal/adapters"
@@ -83,12 +82,11 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 	// pipe él mismo. Con un *os.File el extremo de lectura queda a cargo del
 	// llamador, y nadie lo cerraba (un fd filtrado por trabajo).
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
+	setProcessGroup(cmd)
 
 	lb := &limitedBuffer{limit: MaxStreamSize}
 	lb.onOverflow = func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		killProcessGroup(cmd)
 	}
 	cmd.Stdout = lb
 	cmd.Stderr = lb
@@ -103,16 +101,15 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 
 	select {
 	case <-ph.cancel:
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(processTerminateSignal())
-		}
+		terminateProcessGroup(cmd)
 		select {
 		case <-waitCh:
 		case <-time.After(5 * time.Second):
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
+			killProcessGroup(cmd)
+			select {
+			case <-waitCh:
+			case <-time.After(2 * time.Second):
 			}
-			<-waitCh
 		}
 		return lb.Bytes(), lb.Overflowed(), true, nil
 	case werr := <-waitCh:
@@ -121,12 +118,6 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 		}
 		return lb.Bytes(), false, false, werr
 	}
-}
-
-// processTerminateSignal es SIGTERM: primer paso de la cancelación real
-// (TERM→KILL), aplicado solo tras la salida efectiva del proceso.
-func processTerminateSignal() os.Signal {
-	return syscall.SIGTERM
 }
 
 // filteredEnv hereda solo variables de entorno seguras (PATH, HOME, usuario,
