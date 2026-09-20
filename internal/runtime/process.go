@@ -83,12 +83,11 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 	// pipe él mismo. Con un *os.File el extremo de lectura queda a cargo del
 	// llamador, y nadie lo cerraba (un fd filtrado por trabajo).
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	lb := &limitedBuffer{limit: MaxStreamSize}
 	lb.onOverflow = func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		killProcessGroup(cmd)
 	}
 	cmd.Stdout = lb
 	cmd.Stderr = lb
@@ -103,16 +102,15 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 
 	select {
 	case <-ph.cancel:
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(processTerminateSignal())
-		}
+		terminateProcessGroup(cmd)
 		select {
 		case <-waitCh:
 		case <-time.After(5 * time.Second):
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
+			killProcessGroup(cmd)
+			select {
+			case <-waitCh:
+			case <-time.After(2 * time.Second):
 			}
-			<-waitCh
 		}
 		return lb.Bytes(), lb.Overflowed(), true, nil
 	case werr := <-waitCh:
@@ -120,6 +118,31 @@ func runProcess(spec adapters.ProcessSpec, ph *procHandle) (out []byte, truncate
 			return lb.Bytes(), true, false, nil
 		}
 		return lb.Bytes(), false, false, werr
+	}
+}
+
+// terminateProcessGroup envía la señal de terminación al grupo de procesos.
+func terminateProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return
+	}
+	sig, ok := processTerminateSignal().(syscall.Signal)
+	if !ok {
+		sig = syscall.SIGTERM
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {
+		_ = cmd.Process.Signal(processTerminateSignal())
+	}
+}
+
+// killProcessGroup fuerza la muerte de todo el grupo de procesos para no
+// dejar hijos huérfanos con pipes abiertos.
+func killProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		_ = cmd.Process.Kill()
 	}
 }
 

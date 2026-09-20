@@ -473,6 +473,35 @@ func TestCancelSupportedAdapterTransitionsToCanceled(t *testing.T) {
 	}
 }
 
+func TestCancelKillsProcessGroupAndTerminatesPromptly(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{
+		cancel: true,
+		script: "(sleep 30 &); sleep 5; echo ok",
+	}}, 1)
+
+	id, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "x", ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	start := time.Now()
+	j, supported, err := rt.Cancel(id)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if !supported {
+		t.Fatal("esperado cancelación soportada")
+	}
+	if j.State != StateCanceled {
+		t.Fatalf("esperado canceled, got %+v", j)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("la cancelación tardó demasiado (%v), posible cuelgue en pipes heredados", elapsed)
+	}
+}
+
 // Regresión: Transition es idempotente (from==to devuelve nil), así que el
 // segundo Cancel concurrente llegaba a close() sobre un canal ya cerrado y
 // tumbaba el demonio entero con panic.

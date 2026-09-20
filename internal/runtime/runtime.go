@@ -252,7 +252,9 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 	ph.signalCancel()
 
 	// Bloquea hasta que el worker detecte la cancelación y el proceso salga;
-	// se refleja al releer el estado persistido.
+	// se refleja al releer el estado persistido con un timeout acotado para
+	// no colgar el llamador indefinidamente.
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		latest, err := r.store.Load(id)
 		if err != nil {
@@ -260,6 +262,9 @@ func (r *Runtime) Cancel(id string) (job *Job, supported bool, err error) {
 		}
 		if latest.State.IsTerminal() {
 			return latest, true, nil
+		}
+		if time.Now().After(deadline) {
+			return j, true, errors.New("timeout esperando cancelación del proceso")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
