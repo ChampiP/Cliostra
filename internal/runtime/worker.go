@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"log"
 	"path/filepath"
 	"time"
 
@@ -38,7 +39,9 @@ func (r *Runtime) fail(j *Job, reason string, truncated bool) {
 	j.Reason = reason
 	j.Truncated = truncated
 	j.UpdatedAt = time.Now()
-	_ = r.store.Save(j)
+	if err := r.store.Save(j); err != nil {
+		log.Printf("runtime: error al persistir estado failed para job %s: %v", j.ID, err)
+	}
 }
 
 // directRepoAdapters trabajan sobre el repo real del usuario en vez de un
@@ -66,6 +69,8 @@ func (r *Runtime) execute(t *task) {
 	j.State = StatePreparing
 	j.UpdatedAt = time.Now()
 	if err := r.store.Save(j); err != nil {
+		log.Printf("runtime: error al persistir estado preparing para job %s: %v", j.ID, err)
+		r.fail(j, "store_error: "+err.Error(), false)
 		return
 	}
 
@@ -104,6 +109,8 @@ func (r *Runtime) execute(t *task) {
 	j.State = StateRunning
 	j.UpdatedAt = time.Now()
 	if err := r.store.Save(j); err != nil {
+		log.Printf("runtime: error al persistir estado running para job %s: %v", j.ID, err)
+		r.fail(j, "store_error: "+err.Error(), false)
 		return
 	}
 
@@ -123,7 +130,9 @@ func (r *Runtime) execute(t *task) {
 		j.Reason = "canceled_by_client"
 		j.Truncated = truncated
 		j.UpdatedAt = time.Now()
-		_ = r.store.Save(j)
+		if err := r.store.Save(j); err != nil {
+			log.Printf("runtime: error al persistir estado canceled para job %s: %v", j.ID, err)
+		}
 		return
 	}
 	if truncated {
@@ -156,5 +165,8 @@ func (r *Runtime) execute(t *task) {
 		}
 	}
 	j.UpdatedAt = time.Now()
-	_ = r.store.Save(j)
+	if err := r.store.Save(j); err != nil {
+		log.Printf("runtime: error al persistir estado succeeded para job %s: %v", j.ID, err)
+		r.fail(j, "store_error: "+err.Error(), false)
+	}
 }
