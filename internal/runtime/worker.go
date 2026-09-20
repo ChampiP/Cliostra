@@ -42,15 +42,16 @@ func (r *Runtime) fail(j *Job, reason string, truncated bool) {
 }
 
 // directRepoAdapters trabajan sobre el repo real del usuario en vez de un
-// worktree administrado descartable. Existen porque su propio CLI ya
-// incumple el aislamiento de worktree en la práctica (agy: run_command
-// escapa a un scratch propio o al repo real) o porque el worktree, armado
-// desde HEAD, les esconde archivos sin commitear que la tarea necesita leer
-// (codex). El costo es el mismo que correr el CLI del agente a mano: no hay
-// diff aislado que revisar antes de aplicar, el cambio ya quedó en el repo.
+// worktree administrado descartable. El usuario elige esta modalidad para
+// ver los cambios en tiempo real; no hay diff aislado que revisar antes de
+// aplicar porque el cambio ya quedó en el repo. Corren con los permisos del
+// usuario: Git/GitHub ayudan a recuperar cambios, pero no impiden borrar
+// archivos locales durante la ejecución.
 var directRepoAdapters = map[string]bool{
-	"codex": true,
-	"agy":   true,
+	"claude-code": true,
+	"codex":       true,
+	"agy":         true,
+	"opencode":    true,
 }
 
 func (r *Runtime) execute(t *task) {

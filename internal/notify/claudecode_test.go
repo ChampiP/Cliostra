@@ -68,7 +68,7 @@ func TestSendWithTokenWritesAuthThenMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(msgLine[:len(msgLine)-1]), &msg); err != nil {
 		t.Fatalf("json mensaje inválido: %v", err)
 	}
-	if msg.Type != "user_message" || msg.Content != "hola mundo" {
+	if msg.Type != "user" || msg.Message.Role != "user" || msg.Message.Content != "hola mundo" {
 		t.Fatalf("mensaje inesperado: %+v", msg)
 	}
 
@@ -96,7 +96,7 @@ func TestSendWithoutTokenSkipsAuthLine(t *testing.T) {
 	if err := json.Unmarshal([]byte(line[:len(line)-1]), &msg); err != nil {
 		t.Fatalf("json mensaje inválido: %v", err)
 	}
-	if msg.Type != "user_message" || msg.Content != "sin token" {
+	if msg.Type != "user" || msg.Message.Role != "user" || msg.Message.Content != "sin token" {
 		t.Fatalf("mensaje inesperado (¿se mandó auth de más?): %+v", msg)
 	}
 

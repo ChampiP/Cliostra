@@ -88,3 +88,12 @@ func TestMCPDelegateReturnsImmediatelyAndNotifiesOnCompletion(t *testing.T) {
 		t.Fatalf("el aviso debería mencionar el estado final: %s", msgLine)
 	}
 }
+
+func TestFormatDelegateNotificationIncludesTerminalReason(t *testing.T) {
+	text := formatDelegateNotification("job-1", "fake", api.ResultResponse{
+		ID: "job-1", State: "failed", Available: true, Reason: "process_error: exit status 1",
+	}, nil)
+	if !strings.Contains(text, "Motivo: process_error: exit status 1") {
+		t.Fatalf("el aviso debe incluir el motivo terminal: %s", text)
+	}
+}

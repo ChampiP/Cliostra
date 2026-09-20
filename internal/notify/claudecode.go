@@ -46,8 +46,16 @@ type authMessage struct {
 	Token string `json:"token"`
 }
 
+// userMessage sigue el protocolo documentado por el propio Claude Code (ver
+// su mensaje de ayuda "[uds-messaging] Inject messages"): type "user" con el
+// contenido anidado en "message", no "user_message" con "content" plano.
 type userMessage struct {
-	Type    string `json:"type"`
+	Type    string             `json:"type"`
+	Message userMessagePayload `json:"message"`
+}
+
+type userMessagePayload struct {
+	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
@@ -75,7 +83,7 @@ func Send(cfg Config, text string) error {
 			return fmt.Errorf("notify: fallo al enviar auth: %w", err)
 		}
 	}
-	if err := writeLine(conn, userMessage{Type: "user_message", Content: text}); err != nil {
+	if err := writeLine(conn, userMessage{Type: "user", Message: userMessagePayload{Role: "user", Content: text}}); err != nil {
 		return fmt.Errorf("notify: fallo al enviar el mensaje: %w", err)
 	}
 	return nil

@@ -33,6 +33,17 @@ func (fakeAdapter) Result(raw []byte) ([]byte, error) {
 	return []byte(strings.TrimSpace(string(raw))), nil
 }
 
+type failingAdapter struct{}
+
+func (failingAdapter) Name() string { return "failing" }
+func (failingAdapter) Capabilities() adapters.Capabilities {
+	return adapters.Capabilities{Cancel: false}
+}
+func (failingAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapters.ProcessSpec, error) {
+	return adapters.ProcessSpec{Path: "/bin/sh", Args: []string{"-c", "exit 1"}, Dir: worktreeDir}, nil
+}
+func (failingAdapter) Result(raw []byte) ([]byte, error) { return raw, nil }
+
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -178,6 +189,28 @@ func TestMCPStatusAndResultObserveRPCStartedJob(t *testing.T) {
 	result := callTool[api.ResultResponse](t, cs, "result", map[string]any{"id": start.ID})
 	if !result.Available || result.Result != "ok" {
 		t.Fatalf("resultado inesperado: %+v", result)
+	}
+}
+
+func TestMCPResultExposesReasonForFailedRPCJob(t *testing.T) {
+	repo := initTestRepo(t)
+	rt, err := runtime.New(runtime.Config{
+		StateDir:     t.TempDir(),
+		WorktreeRoot: t.TempDir(),
+		Adapters:     map[string]adapters.Adapter{"failing": failingAdapter{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	dial := rpcDialer(t, rt)
+	cs := connectedClient(t, dial)
+
+	result := callTool[api.ResultResponse](t, cs, "run", map[string]any{
+		"adapter": "failing", "repo": repo, "prompt": "hola", "read_only": true, "timeout_seconds": 5,
+	})
+	if !result.Available || result.State != "failed" || result.Reason == "" {
+		t.Fatalf("resultado fallido inesperado: %+v", result)
 	}
 }
 

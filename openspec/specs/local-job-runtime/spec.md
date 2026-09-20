@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Definir trabajos locales, durables y de solo lectura para un único usuario.
+Definir trabajos locales y durables para un único usuario.
 
 ## Requisitos
 
@@ -29,19 +29,38 @@ El sistema DEBE ejecutar un único demonio por usuario, accesible solamente medi
 - CUANDO se solicita su estado o resultado
 - ENTONCES el sistema devuelve un error de no encontrado sin crear estado nuevo
 
-### Requisito: Aislamiento de ejecución
+### Requisito: Ejecución compartida en el repositorio
 
-El sistema DEBE preparar worktrees administrados para cada trabajo y DEBE limitar los trabajos a operaciones de solo lectura. NO DEBE invocar un shell, extraer credenciales, usar flags de bypass ni evadir políticas del proveedor.
+El sistema DEBE ejecutar los cuatro adaptadores (`claude-code`, `agy`, `codex` y `opencode`) directamente sobre la raíz real del repositorio (`gitToplevel`). NO DEBE crear un worktree git descartable ni administrar un diff de revisión para ningún adaptador. Los cambios DEBEN ser visibles durante la ejecución y poder inspeccionarse con `git diff`.
 
-#### Escenario: Trabajo de lectura aislado
+`read_only` DEBE tratarse como una instrucción para el proveedor, no como aislamiento estructural del sistema de archivos.
 
-- DADO un repositorio de origen autorizado y una solicitud de solo lectura
-- CUANDO se inicia el trabajo
-- ENTONCES se ejecuta en un worktree administrado separado
-- Y sus registros quedan separados del repositorio de origen
+El sistema NO DEBE invocar un shell, extraer credenciales ni abrir listeners TCP.
 
-#### Escenario: Solicitud no permitida
+#### Escenario: Ejecución compartida para cualquier adaptador
 
-- DADO una solicitud que exige escritura, shell, red TCP o acceso a credenciales
-- CUANDO se valida antes de iniciar el trabajo
-- ENTONCES el sistema la rechaza sin crear proceso ni worktree
+- DADO un repositorio de origen y un trabajo configurado con `claude-code`, `agy`, `codex` u `opencode`
+- CUANDO se ejecuta el trabajo
+- ENTONCES el proceso se ejecuta directamente sobre la raíz real del repositorio
+- Y no se crea un worktree git descartable ni se administra un diff de revisión
+
+#### Escenario: Inspección de cambios durante la ejecución
+
+- DADO un trabajo con escritura habilitada para cualquier adaptador
+- CUANDO el proceso modifica archivos durante la ejecución
+- ENTONCES los cambios son visibles en el repositorio compartido
+- Y pueden inspeccionarse con `git diff`
+
+#### Escenario: `read_only` sin aislamiento estructural
+
+- DADO un trabajo configurado con `read_only: true` para cualquier adaptador
+- CUANDO se ejecuta el trabajo
+- ENTONCES `read_only` se transmite como instrucción al proveedor
+- Y el proceso sigue ejecutándose sobre el repositorio compartido sin aislamiento estructural
+
+#### Escenario: Invocación estructurada sin shell
+
+- DADO un trabajo válido en preparación para cualquier adaptador
+- CUANDO el runtime inicia el proceso
+- ENTONCES ejecuta el binario con argumentos estructurados directos sin invocar un shell
+- Y preserva las políticas y credenciales del entorno sin exponer listeners de red

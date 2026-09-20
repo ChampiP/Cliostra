@@ -64,7 +64,7 @@ func resultHandler(r *Runtime) api.Handler {
 			return api.ResultResponse{ID: j.ID, State: string(j.State), Available: false}, nil
 		}
 		return api.ResultResponse{
-			ID: j.ID, State: string(j.State), Available: true, Result: j.Result, Diff: j.Diff, Truncated: j.Truncated,
+			ID: j.ID, State: string(j.State), Available: true, Reason: j.Reason, Result: j.Result, Diff: j.Diff, Truncated: j.Truncated,
 		}, nil
 	}
 }

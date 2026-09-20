@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -23,10 +24,10 @@ const delegateWaitTimeout = 2 * time.Hour
 const diffNotifyLimit = 4000
 
 type delegateArgs struct {
-	Adapter  string `json:"adapter" jsonschema:"nombre del adaptador (claude-code o agy)"`
+	Adapter  string `json:"adapter" jsonschema:"nombre del adaptador (claude-code, agy, codex u opencode)"`
 	Repo     string `json:"repo" jsonschema:"ruta absoluta al repositorio git"`
 	Prompt   string `json:"prompt" jsonschema:"instrucción para el trabajo"`
-	ReadOnly bool   `json:"read_only" jsonschema:"true: solo inspecciona, nunca edita. false: edita y ejecuta comandos de verdad, pero SOLO dentro de un worktree git desechable (detached HEAD); el repo real nunca se toca. El aviso final incluye el diff para revisar antes de aplicarlo a tu rama real."`
+	ReadOnly bool   `json:"read_only" jsonschema:"true: instruye al proveedor a solo inspeccionar; no es aislamiento estructural. false: edita y ejecuta comandos de verdad. claude-code, agy, codex y opencode trabajan directamente sobre el repositorio compartido, por lo que los cambios locales se ven durante la ejecución. Usa git diff para inspeccionarlos en vivo."`
 	Model    string `json:"model,omitempty" jsonschema:"modelo a usar, opcional: si se omite se usa el default del CLI del adaptador."`
 	Effort   string `json:"effort,omitempty" jsonschema:"nivel de esfuerzo a usar, opcional: si se omite se usa el default del CLI del adaptador (ej. low, medium, high)."`
 }
@@ -74,7 +75,13 @@ func notifyOnCompletion(dial Dialer, cfg notify.Config, id, adapter string) {
 	}, delegateWaitTimeout)
 
 	text := formatDelegateNotification(id, adapter, resp, err)
-	_ = notify.Send(cfg, text)
+	// No hay nadie esperando esta goroutine: si el envío falla (socket
+	// caído, timeout), el job queda succeeded en el daemon pero sin forma
+	// de enterarse salvo consultando "status"/"result" a mano. Al menos
+	// dejar rastro en stderr (el transporte MCP es stdio, no lo pisa).
+	if sendErr := notify.Send(cfg, text); sendErr != nil {
+		log.Printf("delegate: no se pudo notificar el fin del job %s: %s", id, sendErr)
+	}
 }
 
 // formatDelegateNotification arma el texto que se inyecta en la sesión:
@@ -94,6 +101,9 @@ func formatDelegateNotification(id, adapter string, resp api.ResultResponse, err
 		return b.String()
 	}
 
+	if resp.Reason != "" {
+		fmt.Fprintf(&b, "Motivo: %s\n", resp.Reason)
+	}
 	if resp.Result != "" {
 		fmt.Fprintf(&b, "Resultado:\n%s\n", resp.Result)
 	}

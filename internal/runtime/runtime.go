@@ -45,7 +45,7 @@ type Config struct {
 }
 
 // Runtime orquesta el pool de workers, la persistencia y la ejecución de
-// trabajos sobre worktrees administrados.
+// trabajos sobre el repositorio compartido o worktrees administrados.
 type Runtime struct {
 	store        *Store
 	worktreeRoot string
