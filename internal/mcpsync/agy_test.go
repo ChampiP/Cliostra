@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +80,22 @@ func TestAddArgs_Command(t *testing.T) {
 	}
 }
 
+func TestAddArgs_WithEnv(t *testing.T) {
+	entry := mcpServerEntry{
+		Command: "github-mcp",
+		Args:    []string{"start"},
+		Env: map[string]string{
+			"GITHUB_TOKEN": "token123",
+			"API_URL":      "https://api.github.com",
+		},
+	}
+	args := addArgs("github", entry)
+	want := []string{"mcp", "add", "--env", "API_URL=https://api.github.com", "--env", "GITHUB_TOKEN=token123", "github", "github-mcp", "start"}
+	if !equalSlices(args, want) {
+		t.Fatalf("args = %v, esperaba %v", args, want)
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -101,8 +118,15 @@ func fakeExecCommand(fail map[string]bool) func(string, ...string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], cs...)
 		cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1"}
 		serverName := ""
-		if len(args) >= 3 {
-			serverName = args[2]
+		for i := 2; i < len(args); i++ {
+			if args[i] == "--env" && i+1 < len(args) {
+				i++
+				continue
+			}
+			if !strings.HasPrefix(args[i], "-") {
+				serverName = args[i]
+				break
+			}
 		}
 		if fail[serverName] {
 			cmd.Env = append(cmd.Env, "GO_HELPER_SHOULD_FAIL=1")
