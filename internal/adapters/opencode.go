@@ -14,11 +14,8 @@ type OpenCodeAdapter struct{}
 
 func (OpenCodeAdapter) Name() string { return "opencode" }
 
-// Cancel no fue verificada empíricamente contra el proceso real de opencode;
-// se declara false para no prometer una capacidad no comprobada (mismo
-// criterio que agy.go).
 func (OpenCodeAdapter) Capabilities() Capabilities {
-	return Capabilities{Cancel: false}
+	return Capabilities{Cancel: true, Resume: true}
 }
 
 // opencodeReadOnlyConfig deniega edición/escritura/bash/webfetch vía
@@ -30,7 +27,8 @@ const opencodeReadOnlyConfig = `{"permission":{"edit":"deny","write":"deny","bas
 // Build arma argv fijo para `opencode run`. read_only=false agrega --auto
 // para auto-aprobar permisos (necesario para ejecutar comandos/tests sin
 // colgarse esperando aprobación); read_only=true impone el modo lectura vía
-// ProcessSpec.Env con OPENCODE_CONFIG_CONTENT.
+// ProcessSpec.Env con OPENCODE_CONFIG_CONTENT. Si se pasa req.SessionID,
+// reanuda la conversación vía --session.
 func (OpenCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, error) {
 	path, err := lookPath("opencode")
 	if err != nil {
@@ -38,6 +36,9 @@ func (OpenCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec,
 	}
 
 	args := []string{"run", "--format", "json", "--pure", "--dir", worktreeDir}
+	if req.SessionID != "" {
+		args = append(args, "--session", req.SessionID)
+	}
 	if req.Model != "" {
 		args = append(args, "-m", req.Model)
 	}
@@ -64,8 +65,9 @@ func (OpenCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec,
 // opencodeEvent es una línea JSON de salida de `opencode run --format json`;
 // solo los eventos type=="text" importan para extraer el resultado.
 type opencodeEvent struct {
-	Type string        `json:"type"`
-	Part *opencodePart `json:"part"`
+	Type      string        `json:"type"`
+	SessionID string        `json:"sessionID,omitempty"`
+	Part      *opencodePart `json:"part"`
 }
 
 type opencodePart struct {
@@ -101,4 +103,24 @@ func (OpenCodeAdapter) Result(raw []byte) ([]byte, error) {
 		return buf.Bytes(), nil
 	}
 	return raw, nil
+}
+
+// ExtractSession extrae el sessionID de los eventos JSON de opencode si está presente.
+func (OpenCodeAdapter) ExtractSession(raw []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var ev opencodeEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.SessionID != "" {
+			return ev.SessionID
+		}
+	}
+	return ""
 }

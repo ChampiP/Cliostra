@@ -8,13 +8,14 @@ type ClaudeCodeAdapter struct{}
 func (ClaudeCodeAdapter) Name() string { return "claude-code" }
 
 func (ClaudeCodeAdapter) Capabilities() Capabilities {
-	return Capabilities{Cancel: true}
+	return Capabilities{Cancel: true, Resume: false}
 }
 
 // Build arma argv fijo para Claude Code: impresión no interactiva y el
 // prompt únicamente por stdin. read_only=true usa modo plan (nunca edita);
 // read_only=false usa acceptEdits (edita y corre comandos sin pedir
-// confirmación interactiva, algo obligatorio en modo headless).
+// confirmación interactiva, algo obligatorio en modo headless). Si se pasa
+// req.SessionID, reanuda la conversación existente vía --resume.
 func (ClaudeCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, error) {
 	path, err := lookPath("claude")
 	if err != nil {
@@ -25,6 +26,9 @@ func (ClaudeCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpe
 		mode = "acceptEdits"
 	}
 	args := []string{"--print", "--permission-mode", mode}
+	if req.SessionID != "" {
+		args = append(args, "--resume", req.SessionID)
+	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
@@ -41,4 +45,8 @@ func (ClaudeCodeAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpe
 
 func (ClaudeCodeAdapter) Result(raw []byte) ([]byte, error) {
 	return raw, nil
+}
+
+func (ClaudeCodeAdapter) ExtractSession(raw []byte) string {
+	return ""
 }

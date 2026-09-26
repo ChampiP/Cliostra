@@ -24,19 +24,24 @@ const (
 
 // Errores devueltos por Start antes de crear proceso o worktree alguno.
 var (
-	ErrUnknownAdapter = errors.New("adaptador desconocido")
-	ErrPromptTooLarge = errors.New("prompt excede el límite de 64KiB")
-	ErrJobNotFound    = errors.New("trabajo no encontrado")
+	ErrUnknownAdapter    = errors.New("adaptador desconocido")
+	ErrPromptTooLarge    = errors.New("prompt excede el límite de 64KiB")
+	ErrJobNotFound       = errors.New("trabajo no encontrado")
+	ErrSelfOrchestration = errors.New("un harness host no puede orquestarse a sí mismo")
+	ErrResumeUnavailable = errors.New("continuación no disponible para este trabajo o adaptador")
 )
 
-// StartRequest es la solicitud de arranque de un trabajo.
+// StartRequest es la solicitud de arranque o continuación de un trabajo.
 type StartRequest struct {
-	Adapter  string
-	Repo     string
-	Prompt   string
-	ReadOnly bool
-	Model    string
-	Effort   string
+	Adapter   string
+	Repo      string
+	Prompt    string
+	ReadOnly  bool
+	Model     string
+	Effort    string
+	Caller    string
+	SessionID string
+	JobID     string
 }
 
 // Config configura una instancia de Runtime.
@@ -142,8 +147,41 @@ func (r *Runtime) Start(req StartRequest) (string, error) {
 	if len(req.Prompt) > MaxPromptSize {
 		return "", ErrPromptTooLarge
 	}
-	if _, ok := r.adapters[req.Adapter]; !ok {
+
+	var parent *Job
+	if req.JobID != "" {
+		p, err := r.store.Load(req.JobID)
+		if err != nil {
+			return "", ErrJobNotFound
+		}
+		parent = p
+		if req.Adapter == "" {
+			req.Adapter = parent.Adapter
+		}
+		if req.Repo == "" {
+			req.Repo = parent.Repo
+		}
+		if req.SessionID == "" {
+			req.SessionID = parent.SessionID
+		}
+		if req.SessionID == "" {
+			return "", ErrResumeUnavailable
+		}
+		if parent.ReadOnly {
+			req.ReadOnly = true
+		}
+	}
+
+	if req.Caller != "" && req.Caller == req.Adapter {
+		return "", ErrSelfOrchestration
+	}
+
+	adp, ok := r.adapters[req.Adapter]
+	if !ok {
 		return "", ErrUnknownAdapter
+	}
+	if req.SessionID != "" && !adp.Capabilities().Resume {
+		return "", ErrResumeUnavailable
 	}
 
 	now := time.Now()
@@ -154,9 +192,14 @@ func (r *Runtime) Start(req StartRequest) (string, error) {
 		ReadOnly:  req.ReadOnly,
 		Model:     req.Model,
 		Effort:    req.Effort,
+		Caller:    req.Caller,
+		SessionID: req.SessionID,
 		State:     StateQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
+	}
+	if parent != nil {
+		j.ParentID = parent.ID
 	}
 	if err := r.store.Save(j); err != nil {
 		return "", err

@@ -32,17 +32,19 @@ func (fakeAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapter
 func (fakeAdapter) Result(raw []byte) ([]byte, error) {
 	return []byte(strings.TrimSpace(string(raw))), nil
 }
+func (fakeAdapter) ExtractSession(raw []byte) string { return "fake-session-123" }
 
 type failingAdapter struct{}
 
 func (failingAdapter) Name() string { return "failing" }
 func (failingAdapter) Capabilities() adapters.Capabilities {
-	return adapters.Capabilities{Cancel: false}
+	return adapters.Capabilities{Cancel: false, Resume: false}
 }
 func (failingAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapters.ProcessSpec, error) {
 	return adapters.ProcessSpec{Path: "/bin/sh", Args: []string{"-c", "exit 1"}, Dir: worktreeDir}, nil
 }
 func (failingAdapter) Result(raw []byte) ([]byte, error) { return raw, nil }
+func (failingAdapter) ExtractSession(raw []byte) string  { return "" }
 
 func initTestRepo(t *testing.T) string {
 	t.Helper()
@@ -282,12 +284,48 @@ type slowAdapter struct{}
 
 func (slowAdapter) Name() string { return "slow" }
 func (slowAdapter) Capabilities() adapters.Capabilities {
-	return adapters.Capabilities{Cancel: false}
+	return adapters.Capabilities{Cancel: false, Resume: false}
 }
 func (slowAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapters.ProcessSpec, error) {
 	return adapters.ProcessSpec{Path: "/bin/sh", Args: []string{"-c", "sleep 5"}, Dir: worktreeDir}, nil
 }
 func (slowAdapter) Result(raw []byte) ([]byte, error) { return raw, nil }
+func (slowAdapter) ExtractSession(raw []byte) string  { return "" }
+
+type resumableAdapter struct{}
+
+func (resumableAdapter) Name() string { return "resumable" }
+func (resumableAdapter) Capabilities() adapters.Capabilities {
+	return adapters.Capabilities{Cancel: true, Resume: true}
+}
+func (resumableAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapters.ProcessSpec, error) {
+	if req.SessionID != "" {
+		return adapters.ProcessSpec{
+			Path:  "/bin/sh",
+			Args:  []string{"-c", "cat >/dev/null; echo resumed-" + req.SessionID},
+			Dir:   worktreeDir,
+			Stdin: []byte(req.Prompt),
+		}, nil
+	}
+	return adapters.ProcessSpec{
+		Path:  "/bin/sh",
+		Args:  []string{"-c", "cat >/dev/null; echo session:sess-999; echo initial"},
+		Dir:   worktreeDir,
+		Stdin: []byte(req.Prompt),
+	}, nil
+}
+func (resumableAdapter) Result(raw []byte) ([]byte, error) {
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	return []byte(lines[len(lines)-1]), nil
+}
+func (resumableAdapter) ExtractSession(raw []byte) string {
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(l, "session:") {
+			return strings.TrimPrefix(l, "session:")
+		}
+	}
+	return ""
+}
 
 func newSlowRuntime(t *testing.T, repo string) (*runtime.Runtime, error) {
 	t.Helper()
@@ -313,5 +351,76 @@ func TestMCPCancelUnsupportedReturnsFalse(t *testing.T) {
 	cancel := callTool[api.CancelResponse](t, cs, "cancel", map[string]any{"id": start.ID})
 	if cancel.Supported {
 		t.Fatal("fakeAdapter no declara cancelación soportada")
+	}
+}
+
+func TestMCPRunRejectsSelfOrchestration(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t)
+	dial := rpcDialer(t, rt)
+
+	// Set host environment variable to claude-code
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	cs := connectedClient(t, dial)
+
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "run",
+		Arguments: map[string]any{
+			"adapter":   "claude-code",
+			"repo":      repo,
+			"prompt":    "hola",
+			"read_only": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("run con adapter igual al host debe devolver error de tool")
+	}
+	b, _ := json.Marshal(res.Content)
+	if !strings.Contains(string(b), "no puede orquestarse a sí mismo") {
+		t.Fatalf("mensaje de error inesperado: %s", string(b))
+	}
+}
+
+func TestMCPContinueReusesSession(t *testing.T) {
+	repo := initTestRepo(t)
+	rt, err := runtime.New(runtime.Config{
+		StateDir:     t.TempDir(),
+		WorktreeRoot: t.TempDir(),
+		Workers:      2,
+		Adapters:     map[string]adapters.Adapter{"resumable": resumableAdapter{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+
+	dial := rpcDialer(t, rt)
+	cs := connectedClient(t, dial)
+
+	// Run initial job
+	res1 := callTool[api.ResultResponse](t, cs, "run", map[string]any{
+		"adapter":   "resumable",
+		"repo":      repo,
+		"prompt":    "primero",
+		"read_only": true,
+	})
+	if !res1.Available || res1.Result != "initial" {
+		t.Fatalf("resultado inicial inesperado: %+v", res1)
+	}
+	if res1.SessionID != "sess-999" {
+		t.Fatalf("session_id esperado sess-999, got %q", res1.SessionID)
+	}
+
+	// Continue job
+	res2 := callTool[api.ResultResponse](t, cs, "continue", map[string]any{
+		"job_id":    res1.ID,
+		"prompt":    "segundo",
+		"read_only": true,
+	})
+	if !res2.Available || res2.Result != "resumed-sess-999" {
+		t.Fatalf("resultado de continuación inesperado: %+v", res2)
 	}
 }

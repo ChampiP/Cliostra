@@ -76,12 +76,17 @@ func cmdStart(args []string) {
 	write := fs.Bool("write", false, "permite edición real en el repo compartido para todos los adaptadores; inspecciona cambios en vivo con git diff (default: solo lectura)")
 	model := fs.String("model", "", "modelo a usar (opcional; vacío = default del adaptador)")
 	effort := fs.String("effort", "", "nivel de esfuerzo (opcional; vacío = default del adaptador)")
+	jobID := fs.String("job", "", "identificador de un trabajo previo a continuar (opcional)")
+	sessionID := fs.String("session", "", "identificador de sesión de proveedor a reanudar (opcional)")
 	fs.Parse(args)
 
 	conn := mustDial()
 	defer conn.Close()
 	var resp api.StartResponse
-	req := api.StartRequest{Adapter: *adapter, Repo: *repo, Prompt: *prompt, ReadOnly: !*write, Model: *model, Effort: *effort}
+	req := api.StartRequest{
+		Adapter: *adapter, Repo: *repo, Prompt: *prompt, ReadOnly: !*write,
+		Model: *model, Effort: *effort, JobID: *jobID, SessionID: *sessionID,
+	}
 	if err := api.Call(conn, "start", req, &resp); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

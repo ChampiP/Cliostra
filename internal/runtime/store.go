@@ -16,6 +16,9 @@ type Job struct {
 	ReadOnly  bool      `json:"read_only"`
 	Model     string    `json:"model,omitempty"`
 	Effort    string    `json:"effort,omitempty"`
+	Caller    string    `json:"caller,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+	ParentID  string    `json:"parent_id,omitempty"`
 	State     State     `json:"state"`
 	Reason    string    `json:"reason,omitempty"`
 	Result    string    `json:"result,omitempty"`

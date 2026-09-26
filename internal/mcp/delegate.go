@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ const delegateDescription = "Delega un trabajo de forma ASÍNCRONA: lo encola y 
 // "run": arranca el trabajo y devuelve el id sin esperar, y notifica el
 // resultado más tarde vía internal/notify desde una goroutine de fondo.
 func addDelegateTool(s *sdk.Server, dial Dialer, notifyCfg notify.Config) {
+	host := api.DetectHost(os.LookupEnv)
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "delegate",
 		Description: delegateDescription,
@@ -46,11 +48,15 @@ func addDelegateTool(s *sdk.Server, dial Dialer, notifyCfg notify.Config) {
 			err := errors.New("delegate solo funciona cuando Cliostra corre como servidor MCP dentro de una sesión de Claude Code (falta el socket de mensajería); usá \"run\" en su lugar")
 			return toolResult(err), api.StartResponse{}, nil
 		}
+		if host != "" && args.Adapter == host {
+			err := fmt.Errorf("el host %q no puede orquestarse a sí mismo: seleccioná otro adaptador (claude-code, agy, codex, opencode)", host)
+			return toolResult(err), api.StartResponse{}, nil
+		}
 
 		var start api.StartResponse
 		if err := call(dial, "start", api.StartRequest{
 			Adapter: args.Adapter, Repo: args.Repo, Prompt: args.Prompt, ReadOnly: args.ReadOnly,
-			Model: args.Model, Effort: args.Effort,
+			Model: args.Model, Effort: args.Effort, Caller: host,
 		}, &start); err != nil {
 			return toolResult(err), api.StartResponse{}, nil
 		}
@@ -101,6 +107,9 @@ func formatDelegateNotification(id, adapter string, resp api.ResultResponse, err
 		return b.String()
 	}
 
+	if resp.SessionID != "" {
+		fmt.Fprintf(&b, "Sesión: %s\n", resp.SessionID)
+	}
 	if resp.Reason != "" {
 		fmt.Fprintf(&b, "Motivo: %s\n", resp.Reason)
 	}

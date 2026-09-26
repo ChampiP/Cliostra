@@ -5,10 +5,31 @@ import (
 	"testing"
 )
 
-func TestOpenCodeAdapterDeclaresNoCancel(t *testing.T) {
+func TestOpenCodeAdapterCapabilities(t *testing.T) {
 	a := OpenCodeAdapter{}
-	if a.Capabilities().Cancel {
-		t.Fatal("opencode no debe declarar cancelación soportada")
+	if !a.Capabilities().Cancel {
+		t.Fatal("opencode debe declarar cancelación soportada")
+	}
+	if !a.Capabilities().Resume {
+		t.Fatal("opencode debe declarar continuación soportada")
+	}
+}
+
+func TestOpenCodeAdapterBuildsResumeFlags(t *testing.T) {
+	withFakeLookPath(t, map[string]string{"opencode": "/usr/bin/opencode"})
+	a := OpenCodeAdapter{}
+	spec, err := a.Build(StartRequest{Prompt: "hola", ReadOnly: true, SessionID: "ses_abc123"}, "/tmp/wt")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	found := false
+	for i, arg := range spec.Args {
+		if arg == "--session" && i+1 < len(spec.Args) && spec.Args[i+1] == "ses_abc123" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("se esperaba flag --session ses_abc123 en args: %v", spec.Args)
 	}
 }
 
@@ -182,5 +203,14 @@ func TestOpenCodeResultFallsBackToRawWithoutTextEvents(t *testing.T) {
 	}
 	if string(out) != raw {
 		t.Fatalf("esperado fallback a la salida cruda, got %q", out)
+	}
+}
+
+func TestOpenCodeAdapterExtractSession(t *testing.T) {
+	a := OpenCodeAdapter{}
+	raw := `{"type":"text","sessionID":"ses_9988","part":{"type":"text","text":"ok"}}`
+	sess := a.ExtractSession([]byte(raw))
+	if sess != "ses_9988" {
+		t.Fatalf("ExtractSession = %q, want ses_9988", sess)
 	}
 }

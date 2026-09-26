@@ -18,6 +18,40 @@ func writeConfig(t *testing.T, dir, name, content string) string {
 	}
 	return path
 }
+func TestIsAllowedWorkerMCPServer(t *testing.T) {
+	if IsAllowedWorkerMCPServer("cliostra", mcpServerEntry{Command: "cliostra", Args: []string{"mcp"}}) {
+		t.Fatal("cliostra no debe estar permitido para workers")
+	}
+	if IsAllowedWorkerMCPServer("my-cliostra", mcpServerEntry{Command: "/usr/local/bin/cliostra"}) {
+		t.Fatal("entradas que ejecutan cliostra no deben estar permitidas")
+	}
+	if !IsAllowedWorkerMCPServer("engram", mcpServerEntry{Command: "engram", Args: []string{"mcp"}}) {
+		t.Fatal("engram debe estar permitido")
+	}
+	if !IsAllowedWorkerMCPServer("context7", mcpServerEntry{ServerURL: "https://mcp.context7.com/mcp"}) {
+		t.Fatal("context7 debe estar permitido")
+	}
+	if !IsAllowedWorkerMCPServer("codegraph", mcpServerEntry{Command: "codegraph", Args: []string{"mcp"}}) {
+		t.Fatal("codegraph debe estar permitido")
+	}
+}
+
+func TestMissingEntries_FiltraCliostra(t *testing.T) {
+	dir := t.TempDir()
+	desktop := writeConfig(t, dir, "desktop.json", `{"mcpServers":{"cliostra":{"command":"cliostra","args":["mcp"]},"engram":{"command":"engram","args":["mcp"]},"context7":{"serverUrl":"https://mcp.context7.com/mcp"}}}`)
+	headless := writeConfig(t, dir, "headless.json", `{"mcpServers":{}}`)
+
+	missing, err := missingEntries(desktop, headless)
+	if err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+	if _, ok := missing["cliostra"]; ok {
+		t.Fatal("cliostra no debe incluirse en missingEntries")
+	}
+	if len(missing) != 2 {
+		t.Fatalf("esperaba 2 entradas (engram, context7), obtuve %d: %v", len(missing), missing)
+	}
+}
 
 func TestMissingEntries_UnaFaltante(t *testing.T) {
 	dir := t.TempDir()
@@ -215,5 +249,25 @@ func TestSyncAgyPaths_AgyNoInstalado(t *testing.T) {
 	}
 	if calledExec {
 		t.Fatalf("no debería haberse invocado exec.Command sin agy instalado")
+	}
+}
+
+func TestSyncAgyPaths_RemueveEntradaBloqueadaPreexistente(t *testing.T) {
+	dir := t.TempDir()
+	desktop := writeConfig(t, dir, "desktop.json", `{"mcpServers":{"engram":{"command":"engram","args":["mcp"]}}}`)
+	headless := writeConfig(t, dir, "headless.json", `{"mcpServers":{"cliostra":{"command":"cliostra","args":["mcp"]},"engram":{"command":"engram","args":["mcp"]}}}`)
+
+	origLookPath, origExec := lookPath, execCommand
+	defer func() { lookPath, execCommand = origLookPath, origExec }()
+	lookPath = func(string) (string, error) { return "/usr/bin/agy", nil }
+	execCommand = fakeExecCommand(nil)
+
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+	if err := syncAgyPaths(logger, desktop, headless); err != nil {
+		t.Fatalf("error inesperado: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("servidor MCP bloqueado \"cliostra\" removido")) {
+		t.Fatalf("esperaba log de remoción de cliostra, obtuve: %s", buf.String())
 	}
 }

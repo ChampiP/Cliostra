@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // gitToplevel devuelve la raíz Git absoluta de repo, o error si repo no es
@@ -72,10 +73,73 @@ func gitDiff(worktreeDir string) (string, error) {
 	return out, nil
 }
 
+// gitSnapshotTree crea un snapshot del árbol git en la base de objetos sin tocar
+// el índice real ni el HEAD del usuario, usando un GIT_INDEX_FILE aislado.
+func gitSnapshotTree(repo string) (string, error) {
+	tmpIndex := filepath.Join(repo, ".git", fmt.Sprintf("cliostra_snap_%d", time.Now().UnixNano()))
+	defer os.Remove(tmpIndex)
+
+	env := append(os.Environ(), "GIT_INDEX_FILE="+tmpIndex)
+	if _, err := runGitWithEnv(repo, env, append([]string{"add", "-A"}, excludePathspecs()...)...); err != nil {
+		return "", err
+	}
+	out, err := runGitWithEnv(repo, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// gitDiffSnapshot calcula el diff entre dos snapshots de árbol (tree OIDs)
+// aplicando exclusión de andamiaje de agentes.
+func gitDiffSnapshot(repo, tree1, tree2 string) (string, error) {
+	if tree1 == "" || tree2 == "" || tree1 == tree2 {
+		return "", nil
+	}
+	out, err := runGit(repo, append([]string{"diff", tree1, tree2}, excludePathspecs()...)...)
+	if err != nil {
+		return "", err
+	}
+	if len(out) > MaxResultSize {
+		out = out[:MaxResultSize]
+	}
+	return out, nil
+}
+
+// gitDiffDirect devuelve el diff de cambios sin commitear en el repositorio real
+// (tanto staged como unstaged, contra HEAD), sin ejecutar 'git add -A' para no
+// modificar el índice del usuario. Excluye andamiaje de agentes.
+func gitDiffDirect(repoDir string) (string, error) {
+	out, err := runGit(repoDir, append([]string{"diff", "HEAD"}, excludePathspecs()...)...)
+	if err != nil {
+		out, err = runGit(repoDir, append([]string{"diff"}, excludePathspecs()...)...)
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(out) > MaxResultSize {
+		out = out[:MaxResultSize]
+	}
+	return out, nil
+}
+
 // gitWorktreeRemove elimina el worktree administrado en dest.
 func gitWorktreeRemove(repo, dest string) error {
 	_, err := runGit(repo, "worktree", "remove", "--force", dest)
 	return err
+}
+
+func runGitWithEnv(repo string, env []string, args ...string) (string, error) {
+	full := append([]string{"-C", repo}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%v: %s", err, stderr.String())
+	}
+	return stdout.String(), nil
 }
 
 func runGit(repo string, args ...string) (string, error) {

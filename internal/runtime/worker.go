@@ -96,7 +96,7 @@ func (r *Runtime) execute(t *task) {
 	}
 
 	adapter := r.adapters[j.Adapter]
-	spec, err := adapter.Build(adapters.StartRequest{Repo: j.Repo, Prompt: t.prompt, ReadOnly: j.ReadOnly, Model: j.Model, Effort: j.Effort}, dir)
+	spec, err := adapter.Build(adapters.StartRequest{Repo: j.Repo, Prompt: t.prompt, ReadOnly: j.ReadOnly, Model: j.Model, Effort: j.Effort, SessionID: j.SessionID}, dir)
 	if err != nil {
 		r.fail(j, "adapter_error: "+err.Error(), false)
 		return
@@ -112,6 +112,13 @@ func (r *Runtime) execute(t *task) {
 		log.Printf("runtime: error al persistir estado running para job %s: %v", j.ID, err)
 		r.fail(j, "store_error: "+err.Error(), false)
 		return
+	}
+
+	var baselineTree string
+	if !j.ReadOnly && direct {
+		if snap, err := gitSnapshotTree(dir); err == nil {
+			baselineTree = snap
+		}
 	}
 
 	ph := &procHandle{cancel: make(chan struct{}), adapter: adapter}
@@ -130,18 +137,31 @@ func (r *Runtime) execute(t *task) {
 		j.Reason = "canceled_by_client"
 		j.Truncated = truncated
 		j.UpdatedAt = time.Now()
+		if sess := adapter.ExtractSession(out); sess != "" {
+			j.SessionID = sess
+		}
 		if err := r.store.Save(j); err != nil {
 			log.Printf("runtime: error al persistir estado canceled para job %s: %v", j.ID, err)
 		}
 		return
 	}
 	if truncated {
+		if sess := adapter.ExtractSession(out); sess != "" {
+			j.SessionID = sess
+		}
 		r.fail(j, "stream_limit_exceeded", true)
 		return
 	}
 	if runErr != nil {
+		if sess := adapter.ExtractSession(out); sess != "" {
+			j.SessionID = sess
+		}
 		r.fail(j, "process_error: "+runErr.Error(), false)
 		return
+	}
+
+	if sess := adapter.ExtractSession(out); sess != "" {
+		j.SessionID = sess
 	}
 
 	result, err := adapter.Result(out)
@@ -156,12 +176,22 @@ func (r *Runtime) execute(t *task) {
 
 	j.State = StateSucceeded
 	j.Result = string(result)
-	if !j.ReadOnly && !direct {
-		// El worktree sigue vivo hasta que retorne execute() (cleanup
-		// diferido), así que el diff todavía refleja lo que el adaptador
-		// escribió antes de que se elimine.
-		if diff, err := gitDiff(dir); err == nil {
-			j.Diff = diff
+	if !j.ReadOnly {
+		if direct {
+			if baselineTree != "" {
+				if finalTree, err := gitSnapshotTree(dir); err == nil {
+					if diff, err := gitDiffSnapshot(dir, baselineTree, finalTree); err == nil {
+						j.Diff = diff
+					}
+				}
+			}
+		} else {
+			// El worktree sigue vivo hasta que retorne execute() (cleanup
+			// diferido), así que el diff todavía refleja lo que el adaptador
+			// escribió antes de que se elimine.
+			if diff, err := gitDiff(dir); err == nil {
+				j.Diff = diff
+			}
 		}
 	}
 	j.UpdatedAt = time.Now()

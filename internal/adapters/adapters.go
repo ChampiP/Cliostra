@@ -12,6 +12,7 @@ import (
 // nunca debe asumirse disponible.
 type Capabilities struct {
 	Cancel bool
+	Resume bool
 }
 
 // ProcessSpec describe el proceso a lanzar: argv fijo, sin shell, prompt por
@@ -30,11 +31,12 @@ type ProcessSpec struct {
 // StartRequest es la solicitud de trabajo tal como llega desde internal/api,
 // duplicada aquí para no acoplar adapters a runtime.
 type StartRequest struct {
-	Repo     string
-	Prompt   string
-	ReadOnly bool
-	Model    string
-	Effort   string
+	Repo      string
+	Prompt    string
+	ReadOnly  bool
+	Model     string
+	Effort    string
+	SessionID string
 }
 
 // Adapter traduce una solicitud en un proceso ejecutable y sabe interpretar
@@ -44,6 +46,7 @@ type Adapter interface {
 	Capabilities() Capabilities
 	Build(req StartRequest, worktreeDir string) (ProcessSpec, error)
 	Result(raw []byte) ([]byte, error)
+	ExtractSession(raw []byte) string
 }
 
 // ErrAdapterUnavailable se devuelve cuando el binario del adaptador no está

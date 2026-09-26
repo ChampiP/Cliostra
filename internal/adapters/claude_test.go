@@ -10,8 +10,29 @@ func TestClaudeCodeAdapterCapabilities(t *testing.T) {
 	if !a.Capabilities().Cancel {
 		t.Fatal("claude-code debe declarar cancelación soportada")
 	}
+	if a.Capabilities().Resume {
+		t.Fatal("claude-code debe declarar Resume=false al no extraer session id verificable")
+	}
 	if a.Name() != "claude-code" {
 		t.Fatalf("nombre inesperado: %s", a.Name())
+	}
+}
+
+func TestClaudeCodeAdapterBuildsResumeFlag(t *testing.T) {
+	withFakeLookPath(t, map[string]string{"claude": "/usr/bin/claude"})
+	a := ClaudeCodeAdapter{}
+	spec, err := a.Build(StartRequest{Prompt: "x", ReadOnly: true, SessionID: "sess-uuid-1"}, "/tmp/wt")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	found := false
+	for i, arg := range spec.Args {
+		if arg == "--resume" && i+1 < len(spec.Args) && spec.Args[i+1] == "sess-uuid-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("se esperaba flag --resume sess-uuid-1 en args: %v", spec.Args)
 	}
 }
 

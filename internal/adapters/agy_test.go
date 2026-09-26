@@ -6,10 +6,31 @@ import (
 	"testing"
 )
 
-func TestAgyAdapterDeclaresNoCancel(t *testing.T) {
+func TestAgyAdapterCapabilities(t *testing.T) {
 	a := AgyAdapter{}
-	if a.Capabilities().Cancel {
-		t.Fatal("agy no debe declarar cancelación soportada")
+	if !a.Capabilities().Cancel {
+		t.Fatal("agy debe declarar cancelación soportada")
+	}
+	if !a.Capabilities().Resume {
+		t.Fatal("agy debe declarar continuación soportada")
+	}
+}
+
+func TestAgyAdapterBuildsConversationFlag(t *testing.T) {
+	withFakeLookPath(t, map[string]string{"agy": "/usr/bin/agy"})
+	a := AgyAdapter{}
+	spec, err := a.Build(StartRequest{Prompt: "hola", ReadOnly: true, SessionID: "c-conv-123"}, "/tmp/wt")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	found := false
+	for i, arg := range spec.Args {
+		if arg == "--conversation" && i+1 < len(spec.Args) && spec.Args[i+1] == "c-conv-123" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("se esperaba flag --conversation c-conv-123 en args: %v", spec.Args)
 	}
 }
 
@@ -213,5 +234,14 @@ func TestAgyResultIgnoresGarbageLinesInterleaved(t *testing.T) {
 	}
 	if string(out) != "ok final" {
 		t.Fatalf("respuesta inesperada: %q", out)
+	}
+}
+
+func TestAgyAdapterExtractSession(t *testing.T) {
+	a := AgyAdapter{}
+	raw := `{"event":"result","result":{"conversation_id":"c1-xyz","status":"SUCCESS","response":"ok"}}`
+	sess := a.ExtractSession([]byte(raw))
+	if sess != "c1-xyz" {
+		t.Fatalf("ExtractSession = %q, want c1-xyz", sess)
 	}
 }

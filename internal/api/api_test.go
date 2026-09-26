@@ -11,7 +11,7 @@ import (
 
 func TestWriteReadFrameRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
-	req := StartRequest{Adapter: "claude-code", Repo: "/repo", Prompt: "hola", ReadOnly: true}
+	req := StartRequest{Adapter: "claude-code", Repo: "/repo", Prompt: "hola", ReadOnly: true, Caller: "opencode", SessionID: "s-123", JobID: "j-456"}
 	if err := WriteFrame(&buf, req); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
@@ -22,6 +22,37 @@ func TestWriteReadFrameRoundTrip(t *testing.T) {
 	}
 	if got != req {
 		t.Fatalf("round trip mismatch: got %+v want %+v", got, req)
+	}
+}
+
+func TestDetectHost(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "empty", env: map[string]string{}, want: ""},
+		{name: "explicit host", env: map[string]string{"CLIOSTRA_HOST": "codex"}, want: "codex"},
+		{name: "claude messaging socket", env: map[string]string{"CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/cc.sock"}, want: "claude-code"},
+		{name: "claude entrypoint", env: map[string]string{"CLAUDE_CODE_ENTRYPOINT": "cli"}, want: "claude-code"},
+		{name: "claude project dir", env: map[string]string{"CLAUDE_PROJECT_DIR": "/home/user/proj"}, want: "claude-code"},
+		{name: "opencode env", env: map[string]string{"OPENCODE": "1"}, want: "opencode"},
+		{name: "opencode session", env: map[string]string{"OPENCODE_SESSION_ID": "ses_abc"}, want: "opencode"},
+		{name: "agy agent", env: map[string]string{"ANTIGRAVITY_AGENT": "1"}, want: "agy"},
+		{name: "gemini cli", env: map[string]string{"GEMINI_CLI": "1"}, want: "agy"},
+		{name: "codex session", env: map[string]string{"CODEX_SESSION_ID": "codex_123"}, want: "codex"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DetectHost(func(k string) (string, bool) {
+				v, ok := tc.env[k]
+				return v, ok
+			})
+			if got != tc.want {
+				t.Fatalf("DetectHost() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -47,14 +47,17 @@ func NewError(code ErrorCode, msg string) *Error {
 	return &Error{Code: code, Message: msg}
 }
 
-// StartRequest es la solicitud para iniciar un trabajo.
+// StartRequest es la solicitud para iniciar o continuar un trabajo.
 type StartRequest struct {
-	Adapter  string `json:"adapter"`
-	Repo     string `json:"repo"`
-	Prompt   string `json:"prompt"`
-	ReadOnly bool   `json:"read_only"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
+	Adapter   string `json:"adapter,omitempty"`
+	Repo      string `json:"repo,omitempty"`
+	Prompt    string `json:"prompt"`
+	ReadOnly  bool   `json:"read_only"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	Caller    string `json:"caller,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	JobID     string `json:"job_id,omitempty"`
 }
 
 // StartResponse confirma el identificador asignado sin esperar finalización.
@@ -73,6 +76,7 @@ type StatusResponse struct {
 	State     string `json:"state"`
 	Reason    string `json:"reason,omitempty"`
 	Truncated bool   `json:"truncated"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // ResultRequest identifica el trabajo cuyo resultado se solicita.
@@ -89,6 +93,7 @@ type ResultResponse struct {
 	Result    string `json:"result,omitempty"`
 	Diff      string `json:"diff,omitempty"`
 	Truncated bool   `json:"truncated"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // CancelRequest identifica el trabajo a cancelar.
@@ -215,4 +220,46 @@ func Serve(conn net.Conn, handlers map[string]Handler) error {
 			return err
 		}
 	}
+}
+
+// DetectHost examina variables de entorno para identificar de forma confiable
+// el harness host que invoca Cliostra ("claude-code", "opencode", "agy", "codex", o "").
+func DetectHost(lookup func(string) (string, bool)) string {
+	if lookup == nil {
+		return ""
+	}
+	if v, ok := lookup("CLIOSTRA_HOST"); ok && v != "" {
+		return v
+	}
+	if v, ok := lookup("CLAUDE_CODE_MESSAGING_SOCKET"); ok && v != "" {
+		return "claude-code"
+	}
+	if v, ok := lookup("CLAUDE_CODE_ENTRYPOINT"); ok && v != "" {
+		return "claude-code"
+	}
+	if v, ok := lookup("CLAUDE_PROJECT_DIR"); ok && v != "" {
+		return "claude-code"
+	}
+	if v, ok := lookup("OPENCODE"); ok && v != "" {
+		return "opencode"
+	}
+	if v, ok := lookup("OPENCODE_SESSION_ID"); ok && v != "" {
+		return "opencode"
+	}
+	if v, ok := lookup("ANTIGRAVITY_AGENT"); ok && v != "" {
+		return "agy"
+	}
+	if v, ok := lookup("GEMINI_CLI"); ok && v != "" {
+		return "agy"
+	}
+	if v, ok := lookup("ANTIGRAVITY_SHELL"); ok && v != "" {
+		return "agy"
+	}
+	if v, ok := lookup("CODEX_SESSION_ID"); ok && v != "" {
+		return "codex"
+	}
+	if v, ok := lookup("CODEX_THREAD_ID"); ok && v != "" {
+		return "codex"
+	}
+	return ""
 }

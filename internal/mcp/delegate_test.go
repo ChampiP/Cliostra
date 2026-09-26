@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net"
 	"path/filepath"
 	"strings"
@@ -95,5 +96,46 @@ func TestFormatDelegateNotificationIncludesTerminalReason(t *testing.T) {
 	}, nil)
 	if !strings.Contains(text, "Motivo: process_error: exit status 1") {
 		t.Fatalf("el aviso debe incluir el motivo terminal: %s", text)
+	}
+}
+
+func TestFormatDelegateNotificationIncludesSessionAndDiff(t *testing.T) {
+	text := formatDelegateNotification("job-2", "agy", api.ResultResponse{
+		ID: "job-2", State: "succeeded", Available: true, SessionID: "sess-abc", Result: "done", Diff: "+new line",
+	}, nil)
+	if !strings.Contains(text, "Sesión: sess-abc") {
+		t.Fatalf("el aviso debe incluir la sesión: %s", text)
+	}
+	if !strings.Contains(text, "Diff:\n+new line") {
+		t.Fatalf("el aviso debe incluir el diff: %s", text)
+	}
+}
+
+func TestMCPDelegateRejectsSelfOrchestration(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t)
+	dial := rpcDialer(t, rt)
+
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	cs := connectedClientWithNotify(t, dial, notify.Config{SocketPath: "/tmp/fake.sock"})
+
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "delegate",
+		Arguments: map[string]any{
+			"adapter":   "claude-code",
+			"repo":      repo,
+			"prompt":    "hola",
+			"read_only": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("delegate con adapter igual al host debe devolver error")
+	}
+	b, _ := json.Marshal(res.Content)
+	if !strings.Contains(string(b), "no puede orquestarse a sí mismo") {
+		t.Fatalf("mensaje de error inesperado: %s", string(b))
 	}
 }

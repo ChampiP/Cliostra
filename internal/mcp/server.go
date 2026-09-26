@@ -9,7 +9,9 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"os"
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,22 +55,51 @@ type runArgs struct {
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"tiempo máximo de espera del resultado en segundos (default 60, máximo 600)"`
 }
 
+type continueArgs struct {
+	JobID          string `json:"job_id" jsonschema:"identificador del trabajo previo a continuar"`
+	Prompt         string `json:"prompt" jsonschema:"nueva instrucción o follow-up para el agente"`
+	ReadOnly       bool   `json:"read_only,omitempty" jsonschema:"true: solo inspección; false: permite edición en el repo compartido"`
+	Model          string `json:"model,omitempty" jsonschema:"modelo a usar (opcional)"`
+	Effort         string `json:"effort,omitempty" jsonschema:"nivel de esfuerzo (opcional)"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"tiempo máximo de espera en segundos (default 60, máximo 600)"`
+}
+
 // NewServer construye el servidor MCP con las herramientas del contrato
-// (run/wait/status/result/cancel/delegate), todas delegando al RPC vía dial.
+// (run/continue/wait/status/result/cancel/delegate), todas delegando al RPC vía dial.
 // notifyCfg se usa solo por "delegate" para avisar cuando un trabajo
 // asíncrono termina; el llamador real la arma con notify.ConfigFromEnv(), y
 // los tests pueden inyectar una config apuntando a un socket falso.
 func NewServer(dial Dialer, notifyCfg notify.Config) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: "cliostra", Version: "0.1.0"}, nil)
+	host := api.DetectHost(os.LookupEnv)
 
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "run",
 		Description: "Delega un trabajo y devuelve el resultado final ya resuelto, en una sola llamada (bloquea del lado del servidor hasta que termine o hasta timeout_seconds). Es la única forma de arrancar un trabajo nuevo: no existe un \"start\" separado a propósito, para no dejar trabajos arrancados sin que nadie espere su resultado.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, args runArgs) (*sdk.CallToolResult, api.ResultResponse, error) {
+		if host != "" && args.Adapter == host {
+			err := fmt.Errorf("el host %q no puede orquestarse a sí mismo: seleccioná otro adaptador (claude-code, agy, codex, opencode)", host)
+			return toolResult(err), api.ResultResponse{}, nil
+		}
 		var start api.StartResponse
 		if err := call(dial, "start", api.StartRequest{
 			Adapter: args.Adapter, Repo: args.Repo, Prompt: args.Prompt, ReadOnly: args.ReadOnly,
-			Model: args.Model, Effort: args.Effort,
+			Model: args.Model, Effort: args.Effort, Caller: host,
+		}, &start); err != nil {
+			return toolResult(err), api.ResultResponse{}, nil
+		}
+		resp, err := waitForResult(ctx, dial, waitArgs{ID: start.ID, TimeoutSeconds: args.TimeoutSeconds})
+		return toolResult(err), resp, nil
+	})
+
+	sdk.AddTool(s, &sdk.Tool{
+		Name:        "continue",
+		Description: "Continúa un trabajo previo con una nueva instrucción (follow-up) reutilizando la sesión del proveedor. Bloquea hasta obtener el resultado o hasta agotar timeout_seconds.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, args continueArgs) (*sdk.CallToolResult, api.ResultResponse, error) {
+		var start api.StartResponse
+		if err := call(dial, "start", api.StartRequest{
+			JobID: args.JobID, Prompt: args.Prompt, ReadOnly: args.ReadOnly,
+			Model: args.Model, Effort: args.Effort, Caller: host,
 		}, &start); err != nil {
 			return toolResult(err), api.ResultResponse{}, nil
 		}

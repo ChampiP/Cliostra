@@ -73,6 +73,9 @@ func missingEntries(desktopPath, headlessPath string) (map[string]mcpServerEntry
 
 	missing := make(map[string]mcpServerEntry)
 	for name, entry := range desktop {
+		if !IsAllowedWorkerMCPServer(name, entry) {
+			continue
+		}
 		if _, ok := headless[name]; !ok {
 			missing[name] = entry
 		}
@@ -123,6 +126,22 @@ func SyncAgy(logger *log.Logger) error {
 func syncAgyPaths(logger *log.Logger, desktopPath, headlessPath string) error {
 	if _, err := lookPath("agy"); err != nil {
 		return nil
+	}
+
+	headless, err := readMcpConfig(headlessPath)
+	if err != nil {
+		return err
+	}
+
+	for name, entry := range headless {
+		if !IsAllowedWorkerMCPServer(name, entry) {
+			cmd := execCommand("agy", "mcp", "remove", name)
+			if err := cmd.Run(); err != nil {
+				logger.Printf("mcpsync: no se pudo remover el servidor MCP bloqueado %q del registro headless de agy: %v", name, err)
+				continue
+			}
+			logger.Printf("mcpsync: servidor MCP bloqueado %q removido del registro headless de agy", name)
+		}
 	}
 
 	missing, err := missingEntries(desktopPath, headlessPath)

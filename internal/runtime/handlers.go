@@ -25,7 +25,7 @@ func startHandler(r *Runtime) api.Handler {
 		}
 		id, err := r.Start(StartRequest{
 			Adapter: req.Adapter, Repo: req.Repo, Prompt: req.Prompt, ReadOnly: req.ReadOnly,
-			Model: req.Model, Effort: req.Effort,
+			Model: req.Model, Effort: req.Effort, Caller: req.Caller, SessionID: req.SessionID, JobID: req.JobID,
 		})
 		if err != nil {
 			return nil, api.NewError(api.ErrInvalidArgument, err.Error())
@@ -45,7 +45,7 @@ func statusHandler(r *Runtime) api.Handler {
 			return nil, api.NewError(api.ErrNotFound, err.Error())
 		}
 		return api.StatusResponse{
-			ID: j.ID, State: string(j.State), Reason: j.Reason, Truncated: j.Truncated,
+			ID: j.ID, State: string(j.State), Reason: j.Reason, Truncated: j.Truncated, SessionID: j.SessionID,
 		}, nil
 	}
 }
@@ -61,10 +61,10 @@ func resultHandler(r *Runtime) api.Handler {
 			return nil, api.NewError(api.ErrNotFound, err.Error())
 		}
 		if !j.State.IsTerminal() {
-			return api.ResultResponse{ID: j.ID, State: string(j.State), Available: false}, nil
+			return api.ResultResponse{ID: j.ID, State: string(j.State), Available: false, SessionID: j.SessionID}, nil
 		}
 		return api.ResultResponse{
-			ID: j.ID, State: string(j.State), Available: true, Reason: j.Reason, Result: j.Result, Diff: j.Diff, Truncated: j.Truncated,
+			ID: j.ID, State: string(j.State), Available: true, Reason: j.Reason, Result: j.Result, Diff: j.Diff, Truncated: j.Truncated, SessionID: j.SessionID,
 		}, nil
 	}
 }

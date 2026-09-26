@@ -18,7 +18,7 @@ type AgyAdapter struct{}
 func (AgyAdapter) Name() string { return "agy" }
 
 func (AgyAdapter) Capabilities() Capabilities {
-	return Capabilities{Cancel: false}
+	return Capabilities{Cancel: true, Resume: true}
 }
 
 // agyReadOnlyPrefix se antepone al prompt del usuario solo en modo solo
@@ -48,7 +48,7 @@ type agyUserEvent struct {
 // verdad en headless. agy corre directo sobre el repo real (runtime.execute
 // no le arma worktree aislado): su run_command no respeta de forma
 // confiable Dir=worktreeDir, así que fingir aislamiento solo escondía el
-// riesgo real.
+// riesgo real. Si se pasa req.SessionID, reanuda la conversación vía --conversation.
 func (AgyAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, error) {
 	path, err := lookPath("agy")
 	if err != nil {
@@ -71,6 +71,9 @@ func (AgyAdapter) Build(req StartRequest, worktreeDir string) (ProcessSpec, erro
 	stdin := append(line, '\n')
 
 	args := []string{"--print=", "--input-format", "stream-json", "--output-format", "stream-json", "--sandbox"}
+	if req.SessionID != "" {
+		args = append(args, "--conversation", req.SessionID)
+	}
 	if !req.ReadOnly {
 		args = append(args, "--dangerously-skip-permissions")
 	}
@@ -96,15 +99,17 @@ var ErrAgyPermissionDenied = errors.New("agy denegó una herramienta en modo hea
 // agyEvent es una línea NDJSON de salida genérica; solo "result" y
 // "step_update" importan para interpretar el resultado.
 type agyEvent struct {
-	Event      string         `json:"event"`
-	Result     *agyResult     `json:"result"`
-	StepUpdate *agyStepUpdate `json:"step_update"`
+	Event          string         `json:"event"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	Result         *agyResult     `json:"result"`
+	StepUpdate     *agyStepUpdate `json:"step_update"`
 }
 
 type agyResult struct {
-	Status   string  `json:"status"`
-	Response string  `json:"response"`
-	Error    *string `json:"error"`
+	ConversationID string  `json:"conversation_id,omitempty"`
+	Status         string  `json:"status"`
+	Response       string  `json:"response"`
+	Error          *string `json:"error"`
 }
 
 type agyStepUpdate struct {
@@ -185,4 +190,27 @@ func (AgyAdapter) Result(raw []byte) ([]byte, error) {
 		return nil, ErrAgyPermissionDenied
 	}
 	return raw, nil
+}
+
+// ExtractSession extrae el conversation_id de los eventos NDJSON de agy si está presente.
+func (AgyAdapter) ExtractSession(raw []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var ev agyEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Result != nil && ev.Result.ConversationID != "" {
+			return ev.Result.ConversationID
+		}
+		if ev.ConversationID != "" {
+			return ev.ConversationID
+		}
+	}
+	return ""
 }

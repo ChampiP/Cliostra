@@ -30,6 +30,7 @@ func (fakeAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapter
 func (fakeAdapter) Result(raw []byte) ([]byte, error) {
 	return []byte(strings.TrimSpace(string(raw))), nil
 }
+func (fakeAdapter) ExtractSession(raw []byte) string { return "" }
 
 func initTestRepo(t *testing.T) string {
 	t.Helper()

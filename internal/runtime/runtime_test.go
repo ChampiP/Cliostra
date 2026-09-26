@@ -17,14 +17,16 @@ import (
 // fakeAdapter es un adaptador de prueba: no depende de Claude Code ni agy.
 type fakeAdapter struct {
 	cancel   bool
+	resume   bool
 	script   string // script de shell embebido para simular el proceso
 	buildErr error
 	env      []string // variables extra que el adaptador declara en ProcessSpec.Env
+	session  string
 }
 
 func (f fakeAdapter) Name() string { return "fake" }
 func (f fakeAdapter) Capabilities() adapters.Capabilities {
-	return adapters.Capabilities{Cancel: f.cancel}
+	return adapters.Capabilities{Cancel: f.cancel, Resume: f.resume}
 }
 func (f fakeAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapters.ProcessSpec, error) {
 	if f.buildErr != nil {
@@ -44,6 +46,12 @@ func (f fakeAdapter) Build(req adapters.StartRequest, worktreeDir string) (adapt
 }
 func (f fakeAdapter) Result(raw []byte) ([]byte, error) {
 	return []byte(strings.TrimSpace(string(raw))), nil
+}
+func (f fakeAdapter) ExtractSession(raw []byte) string {
+	if f.session != "" {
+		return f.session
+	}
+	return ""
 }
 
 func initTestRepo(t *testing.T) string {
@@ -170,7 +178,7 @@ func TestDiffExcludesAgentScaffolding(t *testing.T) {
 // claude-code, codex, agy y opencode trabajan directo sobre el repo real, no en un
 // worktree descartable (ver directRepoAdapters). Este test fija ese contrato:
 // el proceso debe correr con Dir = raíz del repo, y el cambio debe quedar en
-// el repo real.
+// el repo real y capturar su diff para verificación.
 func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
 	for _, adapter := range []string{"claude-code", "codex", "agy", "opencode"} {
 		t.Run(adapter, func(t *testing.T) {
@@ -186,10 +194,9 @@ func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
 			if j.State != StateSucceeded {
 				t.Fatalf("estado inesperado: %+v", j)
 			}
-			// Sin worktree aislado, no hay diff que capturar: el cambio ya está en
-			// el repo real.
-			if j.Diff != "" {
-				t.Fatalf("modo directo no debe capturar diff: %q", j.Diff)
+			// Modo directo en escritura captura el diff real sin modificar el índice.
+			if !strings.Contains(j.Diff, "directo") {
+				t.Fatalf("modo directo en escritura debe capturar diff: %q", j.Diff)
 			}
 			changed, err := os.ReadFile(filepath.Join(repo, "f.txt"))
 			if err != nil {
@@ -199,6 +206,38 @@ func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
 				t.Fatalf("el cambio debe aplicarse al repo real, got %q", changed)
 			}
 		})
+	}
+}
+
+func TestDirectRepoDiffExcludesPreexistingUserChanges(t *testing.T) {
+	repo := initTestRepo(t)
+	// Cambios preexistentes sin commitear del usuario (modificado y nuevo sin rastreo)
+	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "preexisting.txt"), []byte("user file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	editScript := `echo "job change" > job_created.txt; echo listo`
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"codex": fakeAdapter{script: editScript}}, 1)
+
+	id, err := rt.Start(StartRequest{Adapter: "codex", Repo: repo, Prompt: "hola", ReadOnly: false})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	j := waitTerminal(t, rt, id)
+	if j.State != StateSucceeded {
+		t.Fatalf("estado inesperado: %+v", j)
+	}
+	if !strings.Contains(j.Diff, "job_created.txt") {
+		t.Fatalf("diff debe incluir el archivo creado por el job: %q", j.Diff)
+	}
+	if strings.Contains(j.Diff, "preexisting.txt") {
+		t.Fatalf("diff no debe incluir archivos preexistentes del usuario: %q", j.Diff)
+	}
+	if strings.Contains(j.Diff, "user edit") {
+		t.Fatalf("diff no debe incluir ediciones preexistentes del usuario: %q", j.Diff)
 	}
 }
 
@@ -625,5 +664,134 @@ func TestCancelQueuedJobRemovesFromQueueAndCancels(t *testing.T) {
 	}
 	if j2Final.State != StateCanceled {
 		t.Fatalf("el trabajo cancelado fue ejecutado indebidamente: %+v", j2Final)
+	}
+}
+
+func TestStartRejectsSelfOrchestration(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"claude-code": fakeAdapter{}}, 1)
+
+	_, err := rt.Start(StartRequest{
+		Adapter: "claude-code",
+		Repo:    repo,
+		Prompt:  "x",
+		Caller:  "claude-code",
+	})
+	if err != ErrSelfOrchestration {
+		t.Fatalf("esperado ErrSelfOrchestration, got %v", err)
+	}
+
+	// Delegar en otro adaptador debe funcionar
+	id, err := rt.Start(StartRequest{
+		Adapter: "claude-code",
+		Repo:    repo,
+		Prompt:  "x",
+		Caller:  "opencode",
+	})
+	if err != nil {
+		t.Fatalf("Start con harness diferente falló: %v", err)
+	}
+	waitTerminal(t, rt, id)
+}
+
+func TestStartContinuesPreviousJob(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{resume: true, session: "sess-100"}}, 1)
+
+	id1, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "primero", ReadOnly: true})
+	if err != nil {
+		t.Fatalf("Start 1: %v", err)
+	}
+	j1 := waitTerminal(t, rt, id1)
+	if j1.SessionID != "sess-100" {
+		t.Fatalf("session_id esperado sess-100, got %q", j1.SessionID)
+	}
+
+	// Continuar usando job_id
+	id2, err := rt.Start(StartRequest{JobID: id1, Prompt: "segundo"})
+	if err != nil {
+		t.Fatalf("Start 2 (continuación): %v", err)
+	}
+	j2 := waitTerminal(t, rt, id2)
+	if j2.ParentID != id1 {
+		t.Fatalf("parent_id esperado %q, got %q", id1, j2.ParentID)
+	}
+	if j2.SessionID != "sess-100" {
+		t.Fatalf("session_id en continuación esperado sess-100, got %q", j2.SessionID)
+	}
+	if j2.Adapter != "fake" || j2.Repo != repo {
+		t.Fatalf("adapter/repo heredados incorrectos: %+v", j2)
+	}
+}
+
+func TestStartResumeFailsWhenNoSessionOrUnsupported(t *testing.T) {
+	repo := initTestRepo(t)
+	// fakeAdapter sin soporte resume y sin sesión
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{resume: false}}, 1)
+
+	id1, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "primero", ReadOnly: true})
+	if err != nil {
+		t.Fatalf("Start 1: %v", err)
+	}
+	waitTerminal(t, rt, id1)
+
+	_, err = rt.Start(StartRequest{JobID: id1, Prompt: "segundo"})
+	if err != ErrResumeUnavailable {
+		t.Fatalf("esperado ErrResumeUnavailable, got %v", err)
+	}
+}
+
+func TestStartRejectsSelfOrchestrationOnContinue(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"claude-code": fakeAdapter{resume: true, session: "sess-cc"}}, 1)
+
+	id1, err := rt.Start(StartRequest{
+		Adapter: "claude-code",
+		Repo:    repo,
+		Prompt:  "x",
+		Caller:  "opencode",
+	})
+	if err != nil {
+		t.Fatalf("Start 1: %v", err)
+	}
+	waitTerminal(t, rt, id1)
+
+	// Continue delegando sin especificar adapter (hereda claude-code del padre) con caller claude-code
+	_, err = rt.Start(StartRequest{
+		JobID:  id1,
+		Prompt: "more",
+		Caller: "claude-code",
+	})
+	if err != ErrSelfOrchestration {
+		t.Fatalf("esperado ErrSelfOrchestration en continue con caller igual a adapter heredado, got %v", err)
+	}
+}
+
+func TestStartContinuePreservesReadOnly(t *testing.T) {
+	repo := initTestRepo(t)
+	rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{resume: true, session: "sess-ro"}}, 1)
+
+	id1, err := rt.Start(StartRequest{
+		Adapter:  "fake",
+		Repo:     repo,
+		Prompt:   "primero",
+		ReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Start 1: %v", err)
+	}
+	waitTerminal(t, rt, id1)
+
+	// Continue sin especificar ReadOnly (default false en struct Go)
+	id2, err := rt.Start(StartRequest{
+		JobID:  id1,
+		Prompt: "segundo",
+	})
+	if err != nil {
+		t.Fatalf("Start continue: %v", err)
+	}
+	j2 := waitTerminal(t, rt, id2)
+	if !j2.ReadOnly {
+		t.Fatal("continue de un trabajo read-only debe conservar read-only=true")
 	}
 }

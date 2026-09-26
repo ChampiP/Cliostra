@@ -5,10 +5,31 @@ import (
 	"testing"
 )
 
-func TestCodexAdapterDeclaresNoCancel(t *testing.T) {
+func TestCodexAdapterCapabilities(t *testing.T) {
 	a := CodexAdapter{}
-	if a.Capabilities().Cancel {
-		t.Fatal("codex no debe declarar cancelación soportada")
+	if !a.Capabilities().Cancel {
+		t.Fatal("codex debe declarar cancelación soportada")
+	}
+	if !a.Capabilities().Resume {
+		t.Fatal("codex debe declarar continuación soportada")
+	}
+}
+
+func TestCodexAdapterBuildsResumeFlags(t *testing.T) {
+	withFakeLookPath(t, map[string]string{"codex": "/usr/bin/codex"})
+	a := CodexAdapter{}
+	spec, err := a.Build(StartRequest{Prompt: "hola", ReadOnly: true, SessionID: "thread-uuid-1"}, "/tmp/wt")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	want := []string{"exec", "resume", "--json", "--skip-git-repo-check", "thread-uuid-1", "-"}
+	if len(spec.Args) != len(want) {
+		t.Fatalf("argv=%v, want %v", spec.Args, want)
+	}
+	for i, w := range want {
+		if spec.Args[i] != w {
+			t.Fatalf("argv[%d]=%q, want %q", i, spec.Args[i], w)
+		}
 	}
 }
 
@@ -171,5 +192,14 @@ func TestCodexResultFallsBackToRawWithoutAgentMessage(t *testing.T) {
 	}
 	if string(out) != raw {
 		t.Fatalf("esperado fallback a la salida cruda, got %q", out)
+	}
+}
+
+func TestCodexAdapterExtractSession(t *testing.T) {
+	a := CodexAdapter{}
+	raw := `{"type":"thread.started","thread_id":"th_xyz123"}`
+	sess := a.ExtractSession([]byte(raw))
+	if sess != "th_xyz123" {
+		t.Fatalf("ExtractSession = %q, want th_xyz123", sess)
 	}
 }
