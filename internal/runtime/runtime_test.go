@@ -213,6 +213,31 @@ func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
 // deben filtrar el nombre del worktree (un hash) como proyecto de Engram:
 // tiene que resolver siempre sobre el repo real, tanto en modo directo como
 // en modo worktree aislado.
+// Una caída del daemon a mitad de execute() salta el defer de
+// cleanupWorktree y deja el directorio huérfano bajo worktreeRoot; New()
+// debe barrerlo al arrancar, sin importar si aún tiene metadata git válida.
+func TestNewSweepsOrphanWorktrees(t *testing.T) {
+	stateDir := t.TempDir()
+	worktreeRoot := t.TempDir()
+	orphan := filepath.Join(worktreeRoot, "leftover-job-id")
+	if err := os.MkdirAll(filepath.Join(orphan, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphan, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt, err := New(Config{StateDir: stateDir, WorktreeRoot: worktreeRoot, Workers: 1, Adapters: map[string]adapters.Adapter{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(rt.Close)
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("worktree huérfano debería haberse borrado al arrancar, stat err=%v", err)
+	}
+}
+
 func TestEngramProjectEnvUsesRealRepoName(t *testing.T) {
 	repo := initTestRepo(t)
 	wantName := filepath.Base(repo)

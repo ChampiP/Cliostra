@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -96,6 +97,7 @@ func New(cfg Config) (*Runtime, error) {
 	if err := r.recover(); err != nil {
 		return nil, err
 	}
+	sweepOrphanWorktrees(r.worktreeRoot)
 	for i := 0; i < cfg.Workers; i++ {
 		r.wg.Add(1)
 		go r.workerLoop()
@@ -211,6 +213,22 @@ func (r *Runtime) Start(req StartRequest) (string, error) {
 	r.queueMu.Unlock()
 
 	return j.ID, nil
+}
+
+// ListActive returns safe summaries of all persisted nonterminal jobs in ID order.
+func (r *Runtime) ListActive() ([]*Job, error) {
+	jobs, err := r.store.LoadAll()
+	if err != nil {
+		return nil, err
+	}
+	active := make([]*Job, 0, len(jobs))
+	for _, job := range jobs {
+		if !job.State.IsTerminal() {
+			active = append(active, job)
+		}
+	}
+	sort.Slice(active, func(i, j int) bool { return active[i].ID < active[j].ID })
+	return active, nil
 }
 
 // Status devuelve el registro durable actual del trabajo.
