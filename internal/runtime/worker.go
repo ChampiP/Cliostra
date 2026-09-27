@@ -76,9 +76,10 @@ func (r *Runtime) execute(t *task) {
 
 	direct := directRepoAdapters[j.Adapter]
 
-	var dir string
+	var dir, root string
 	if direct {
-		root, err := gitToplevel(j.Repo)
+		var err error
+		root, err = gitToplevel(j.Repo)
 		if err != nil {
 			r.fail(j, "worktree_error: "+err.Error(), false)
 			return
@@ -86,7 +87,8 @@ func (r *Runtime) execute(t *task) {
 		dir = root
 	} else {
 		worktreeDir := filepath.Join(r.worktreeRoot, j.ID)
-		root, _, err := prepareWorktree(j.Repo, worktreeDir, j.ReadOnly)
+		var err error
+		root, _, err = prepareWorktree(j.Repo, worktreeDir, j.ReadOnly)
 		if err != nil {
 			r.fail(j, "worktree_error: "+err.Error(), false)
 			return
@@ -101,6 +103,11 @@ func (r *Runtime) execute(t *task) {
 		r.fail(j, "adapter_error: "+err.Error(), false)
 		return
 	}
+	// El worktree resuelve su propio toplevel (y su propio remote, si tuviera
+	// uno propio), así que el nombre de proyecto se calcula sobre root (el
+	// repo real), nunca sobre dir: si root no tiene remote, Engram caería a
+	// basename(worktree) — un hash — en vez de basename(root).
+	spec.Env = append(spec.Env, "ENGRAM_PROJECT="+engramProjectName(root))
 
 	if err := Transition(j.State, StateRunning); err != nil {
 		r.fail(j, "invalid_transition", false)

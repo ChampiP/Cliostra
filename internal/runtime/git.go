@@ -29,6 +29,26 @@ func gitHeadOID(repo string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// engramProjectName replica la resolución de proyecto de Engram (remote
+// origin > nombre de carpeta) para poder pasarla como ENGRAM_PROJECT: sin
+// esto, un repo sin remote ejecutado en un worktree resolvería el nombre del
+// worktree (un hash), no el del repo real.
+func engramProjectName(root string) string {
+	out, err := runGit(root, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return filepath.Base(root)
+	}
+	url := strings.TrimSuffix(strings.TrimSpace(out), "/")
+	url = strings.TrimSuffix(url, ".git")
+	if i := strings.LastIndexAny(url, "/:"); i != -1 {
+		url = url[i+1:]
+	}
+	if url == "" {
+		return filepath.Base(root)
+	}
+	return url
+}
+
 // gitWorktreeAdd crea un worktree en dest, en detached HEAD sobre oid.
 func gitWorktreeAdd(repo, dest, oid string) error {
 	_, err := runGit(repo, "worktree", "add", "--detach", dest, oid)

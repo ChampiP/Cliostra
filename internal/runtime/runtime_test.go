@@ -209,6 +209,46 @@ func TestDirectRepoAdaptersSkipWorktree(t *testing.T) {
 	}
 }
 
+// Repos sin remote (caso común en pruebas y en algunos repos reales) no
+// deben filtrar el nombre del worktree (un hash) como proyecto de Engram:
+// tiene que resolver siempre sobre el repo real, tanto en modo directo como
+// en modo worktree aislado.
+func TestEngramProjectEnvUsesRealRepoName(t *testing.T) {
+	repo := initTestRepo(t)
+	wantName := filepath.Base(repo)
+	script := `echo -n "$ENGRAM_PROJECT"`
+
+	t.Run("direct", func(t *testing.T) {
+		rt := newTestRuntime(t, map[string]adapters.Adapter{"agy": fakeAdapter{script: script}}, 1)
+		id, err := rt.Start(StartRequest{Adapter: "agy", Repo: repo, Prompt: "x", ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := waitTerminal(t, rt, id)
+		if j.State != StateSucceeded {
+			t.Fatalf("estado inesperado: %+v", j)
+		}
+		if j.Result != wantName {
+			t.Fatalf("ENGRAM_PROJECT = %q, want %q", j.Result, wantName)
+		}
+	})
+
+	t.Run("worktree", func(t *testing.T) {
+		rt := newTestRuntime(t, map[string]adapters.Adapter{"fake": fakeAdapter{script: script}}, 1)
+		id, err := rt.Start(StartRequest{Adapter: "fake", Repo: repo, Prompt: "x", ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := waitTerminal(t, rt, id)
+		if j.State != StateSucceeded {
+			t.Fatalf("estado inesperado: %+v", j)
+		}
+		if j.Result != wantName {
+			t.Fatalf("ENGRAM_PROJECT = %q (del worktree, no del repo real), want %q", j.Result, wantName)
+		}
+	})
+}
+
 func TestDirectRepoDiffExcludesPreexistingUserChanges(t *testing.T) {
 	repo := initTestRepo(t)
 	// Cambios preexistentes sin commitear del usuario (modificado y nuevo sin rastreo)
@@ -289,6 +329,31 @@ func TestStartRejectsOversizedPrompt(t *testing.T) {
 	_, err := rt.Start(StartRequest{Adapter: "fake", ReadOnly: true, Prompt: strings.Repeat("a", MaxPromptSize+1)})
 	if err != ErrPromptTooLarge {
 		t.Fatalf("esperado ErrPromptTooLarge, got %v", err)
+	}
+}
+
+func TestListActiveReturnsOnlyNonterminalJobsInIDOrder(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range []*Job{
+		{ID: "z-running", State: StateRunning, Result: "secret result", Diff: "secret diff"},
+		{ID: "a-queued", State: StateQueued, Result: "secret prompt"},
+		{ID: "m-done", State: StateSucceeded},
+		{ID: "b-failed", State: StateFailed},
+	} {
+		if err := store.Save(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt := &Runtime{store: store}
+	jobs, err := rt.ListActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 || jobs[0].ID != "a-queued" || jobs[1].ID != "z-running" {
+		t.Fatalf("unexpected active jobs/order: %+v", jobs)
 	}
 }
 
