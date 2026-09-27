@@ -161,6 +161,15 @@ func callTool[T any](t *testing.T, cs *sdk.ClientSession, name string, args any)
 	return out
 }
 
+func TestMCPListActiveJobsReturnsEmptySafeList(t *testing.T) {
+	rt := newTestRuntime(t)
+	cs := connectedClient(t, rpcDialer(t, rt))
+	response := callTool[api.ListActiveResponse](t, cs, "list_active_jobs", map[string]any{})
+	if response.Jobs == nil || len(response.Jobs) != 0 {
+		t.Fatalf("expected empty active-job list, got %+v", response)
+	}
+}
+
 func TestMCPStatusAndResultObserveRPCStartedJob(t *testing.T) {
 	repo := initTestRepo(t)
 	rt := newTestRuntime(t)

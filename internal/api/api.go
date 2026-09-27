@@ -79,6 +79,26 @@ type StatusResponse struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
+// ActiveJob es un resumen seguro de un trabajo no terminal.
+type ActiveJob struct {
+	ID        string `json:"id"`
+	Adapter   string `json:"adapter"`
+	Repo      string `json:"repo"`
+	ReadOnly  bool   `json:"read_only"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	Caller    string `json:"caller,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ListActiveResponse contains active job summaries.
+type ListActiveResponse struct {
+	Jobs []ActiveJob `json:"jobs"`
+}
+
 // ResultRequest identifica el trabajo cuyo resultado se solicita.
 type ResultRequest struct {
 	ID string `json:"id"`

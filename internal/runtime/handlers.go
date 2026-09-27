@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/ChampiP/Cliostra/internal/api"
 )
@@ -10,10 +11,11 @@ import (
 // sobre el socket Unix, delegando toda la lógica al Runtime.
 func Handlers(r *Runtime) map[string]api.Handler {
 	return map[string]api.Handler{
-		"start":  startHandler(r),
-		"status": statusHandler(r),
-		"result": resultHandler(r),
-		"cancel": cancelHandler(r),
+		"start":       startHandler(r),
+		"status":      statusHandler(r),
+		"list_active": listActiveHandler(r),
+		"result":      resultHandler(r),
+		"cancel":      cancelHandler(r),
 	}
 }
 
@@ -31,6 +33,29 @@ func startHandler(r *Runtime) api.Handler {
 			return nil, api.NewError(api.ErrInvalidArgument, err.Error())
 		}
 		return api.StartResponse{ID: id}, nil
+	}
+}
+
+func listActiveHandler(r *Runtime) api.Handler {
+	return func(payload json.RawMessage) (any, *api.Error) {
+		var req struct{}
+		if err := json.Unmarshal(payload, &req); err != nil {
+			return nil, api.NewError(api.ErrInvalidArgument, err.Error())
+		}
+		jobs, err := r.ListActive()
+		if err != nil {
+			return nil, api.NewError(api.ErrInternal, err.Error())
+		}
+		response := api.ListActiveResponse{Jobs: make([]api.ActiveJob, 0, len(jobs))}
+		for _, job := range jobs {
+			response.Jobs = append(response.Jobs, api.ActiveJob{
+				ID: job.ID, Adapter: job.Adapter, Repo: job.Repo, ReadOnly: job.ReadOnly,
+				Model: job.Model, Effort: job.Effort, Caller: job.Caller, ParentID: job.ParentID,
+				State: string(job.State), CreatedAt: job.CreatedAt.UTC().Format(time.RFC3339Nano),
+				UpdatedAt: job.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			})
+		}
+		return response, nil
 	}
 }
 

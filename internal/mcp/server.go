@@ -108,6 +108,15 @@ func NewServer(dial Dialer, notifyCfg notify.Config) *sdk.Server {
 	})
 
 	sdk.AddTool(s, &sdk.Tool{
+		Name:        "list_active_jobs",
+		Description: "Lista trabajos activos (no terminales) con metadatos seguros; no incluye prompts, resultados ni diffs.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, api.ListActiveResponse, error) {
+		var resp api.ListActiveResponse
+		err := call(dial, "list_active", struct{}{}, &resp)
+		return toolResult(err), resp, nil
+	})
+
+	sdk.AddTool(s, &sdk.Tool{
 		Name:        "status",
 		Description: "Devuelve el estado durable actual de un trabajo.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, args idArgs) (*sdk.CallToolResult, api.StatusResponse, error) {
